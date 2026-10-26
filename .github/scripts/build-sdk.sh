@@ -62,7 +62,8 @@ preflight() {
     fi
 
     # Call the mounted compiler directly: runner rustup shims are not in the SDK.
-    export PATH="/builder/staging_dir/host/bin:$TOOLS_RUST_ROOT/bin:$PATH"
+    # Let OpenWrt add staging tools after checking the original host PATH.
+    export PATH="$TOOLS_RUST_ROOT/bin:$PATH"
     "$TOOLS_RUST_ROOT/bin/rustc" --version | grep -F "rustc $RUST_VERSION "
     "$TOOLS_RUST_ROOT/bin/cargo" --version
     target_libdir="$("$TOOLS_RUST_ROOT/bin/rustc" --print target-libdir --target aarch64-unknown-linux-musl)"
