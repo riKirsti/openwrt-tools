@@ -1322,7 +1322,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2325,7 +2325,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2738,15 +2738,13 @@ dependencies = [
 
 [[package]]
 name = "proton-boringtun"
-version = "3.0.2"
+version = "4.9.0"
 source = "sparse+https://rust-registry.proton.me/index/"
-checksum = "97a3fd5ba267f7ea633e4c8a53c0e2f1796997306d0904fc41819b644f0d8110"
+checksum = "0c10f0be52e40d51a36de1aa072bbd417b59042432c852fc3657a8772d678b34"
 dependencies = [
  "aead",
- "base64 0.13.1",
  "blake2",
  "chacha20poly1305",
- "hex",
  "hmac",
  "proton-os-interface",
  "rand 0.10.3",
@@ -2877,9 +2875,9 @@ dependencies = [
 
 [[package]]
 name = "proton-vpn-local-agent"
-version = "0.12.7"
+version = "0.13.0"
 source = "sparse+https://rust-registry.proton.me/index/"
-checksum = "50ef7568274d2788eebefc811a7f887e7c423e3fbf9994cfc8aa0d179a260c4e"
+checksum = "19139ea3336efc154233c058c3b0cf81b34ad49b559aae44701f9b37b329e517"
 dependencies = [
  "futures",
  "futures-rustls",
@@ -2968,7 +2966,7 @@ dependencies = [
 
 [[package]]
 name = "protun"
-version = "3.0.1"
+version = "3.0.5"
 dependencies = [
  "async-compat",
  "base64 0.22.1",
@@ -3028,9 +3026,9 @@ dependencies = [
 
 [[package]]
 name = "pvpnclient"
-version = "4.0.2"
+version = "4.4.1"
 source = "sparse+https://rust-registry.proton.me/index/"
-checksum = "91fa3157e1b9281006159a0e29c44c05aa0741c9426558fc0d83322d58c8b3ba"
+checksum = "c4ef1cf71afb4aa861dddf4092784bdf8deea277b5ba2e27536555e059d50941"
 dependencies = [
  "base64 0.13.1",
  "cookie_store",
@@ -3303,7 +3301,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3829,7 +3827,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4471,7 +4469,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -1,0 +1,87 @@
+name: Update upstream versions
+
+on:
+  schedule:
+    # UTC date parity below keeps a two-day cadence across month boundaries.
+    - cron: '37 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-upstream-versions
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check two-day interval
+        id: interval
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          today=$(( $(date -u +%s) / 86400 ))
+          anchor=$(( $(date -u -d '2026-10-26' +%s) / 86400 ))
+          if [[ "$EVENT_NAME" == workflow_dispatch ]] || (( (today - anchor) % 2 == 0 )); then
+            echo 'due=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'due=false' >> "$GITHUB_OUTPUT"
+            echo 'Next upstream check is on the next two-day interval'
+          fi
+
+      - name: Check workflow update token
+        if: steps.interval.outputs.due == 'true'
+        shell: bash
+        env:
+          UPDATE_TOKEN: ${{ secrets.UPSTREAM_UPDATE_TOKEN }}
+        run: |
+          if [[ -z "$UPDATE_TOKEN" ]]; then
+            echo 'Add UPSTREAM_UPDATE_TOKEN with Contents and Workflows read/write access to this repository.' >&2
+            exit 1
+          fi
+
+      - name: Checkout main
+        if: steps.interval.outputs.due == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ secrets.UPSTREAM_UPDATE_TOKEN }}
+
+      - name: Install the pinned Rust toolchain
+        if: steps.interval.outputs.due == 'true'
+        id: rust
+        shell: bash
+        run: |
+          rust_version=$(sed -n 's/^      RUST_VERSION: //p' .github/workflows/build.yml)
+          if [[ ! $rust_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Cannot read the pinned Rust version from build.yml' >&2
+            exit 1
+          fi
+          rustup toolchain install "$rust_version" --profile minimal --no-self-update
+          echo "version=$rust_version" >> "$GITHUB_OUTPUT"
+
+      - name: Check upstream versions and update package files
+        if: steps.interval.outputs.due == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUSTUP_TOOLCHAIN: ${{ steps.rust.outputs.version }}
+        run: python3 .github/scripts/update-versions.py
+
+      - name: Commit and push version updates
+        if: steps.interval.outputs.due == 'true'
+        shell: bash
+        run: |
+          git add -- 'package/*/Makefile' 'package/*/files/Cargo.lock' \
+            .github/workflows/build.yml
+          if git diff --cached --quiet; then
+            echo 'Upstream versions are already current'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Update upstream versions'
+          git push origin HEAD:refs/heads/main

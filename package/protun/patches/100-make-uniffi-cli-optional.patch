@@ -6,8 +6,7 @@ available through the explicit bindgen-cli feature.
 
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -21,7 +21,7 @@
- pvpnclient = { version = "~4.0.0", registry = "proton" }
+@@ -22,6 +22,6 @@
  rustls-pki-types = { version = "1.14", optional = true, default-features = false }
  socket2 = { version = "0.6.5", optional = true }
 -uniffi = { version = "0.31.0", features = ["cli"], optional = true } # 0.31.0 is the highest uniffi version supported for C#: https://github.com/NordSecurity/uniffi-bindgen-cs

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 shopt -s nullglob
+packages=()
 
 phase=startup
 on_error() {
@@ -20,12 +21,13 @@ run_phase() {
 }
 
 preflight() {
+    : "${SDK_ARCH:?Missing SDK architecture and release}"
     : "${PACKAGES_COMMIT:?Missing packages feed commit}"
-    : "${PROTUN_CARGO_TARGET_DIR:?Missing Cargo cache directory}"
-    : "${PROTUN_RUST_ROOT:?Missing prebuilt Rust toolchain}"
+    : "${TOOLS_CARGO_TARGET_DIR:?Missing Cargo cache directory}"
+    : "${TOOLS_RUST_ROOT:?Missing prebuilt Rust toolchain}"
     : "${RUST_VERSION:?Missing expected Rust version}"
     : "${BUILD_JOBS:=$(nproc)}"
-    : "${PROTUN_BUILD_MODE:=runtime}"
+    : "${TOOLS_BUILD_MODE:=runtime}"
 
     if [[ ! $PACKAGES_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
         echo 'Invalid packages feed commit' >&2
@@ -35,30 +37,41 @@ preflight() {
         echo 'BUILD_JOBS must be a positive integer' >&2
         exit 1
     fi
-    case "$PROTUN_BUILD_MODE" in
-        runtime) echo 'Protun runtime mode: opt-level=3, LTO=thin, codegen-units=16' ;;
-        fast) echo 'Protun fast mode: opt-level=1, LTO=off, codegen-units=16' ;;
+    case "$TOOLS_BUILD_MODE" in
+        runtime) echo 'Tools runtime mode: opt-level=3, LTO=thin, codegen-units=16' ;;
+        fast) echo 'Tools fast mode: opt-level=1, LTO=off, codegen-units=16' ;;
         *)
-            echo 'PROTUN_BUILD_MODE must be runtime or fast' >&2
+            echo 'TOOLS_BUILD_MODE must be runtime or fast' >&2
             exit 1
             ;;
     esac
-    if [[ ${VERSION_PATH:-} != releases/25.12.5 ]]; then
-        echo 'Expected the OpenWrt 25.12.5 release SDK' >&2
+    if [[ ! $SDK_ARCH =~ ^aarch64_cortex-a53-[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+       [[ ${VERSION_PATH:-} != "releases/${SDK_ARCH##*-}" ]]; then
+        echo "SDK does not match requested target: $SDK_ARCH" >&2
+        exit 1
+    fi
+
+    local recipe package
+    for recipe in /feed/*/Makefile; do
+        package=${recipe%/Makefile}
+        packages+=("${package##*/}")
+    done
+    if (( ${#packages[@]} == 0 )); then
+        echo 'No package recipes found in /feed' >&2
         exit 1
     fi
 
     # Call the mounted compiler directly: runner rustup shims are not in the SDK.
-    export PATH="$PROTUN_RUST_ROOT/bin:$PATH"
-    "$PROTUN_RUST_ROOT/bin/rustc" --version | grep -F "rustc $RUST_VERSION "
-    "$PROTUN_RUST_ROOT/bin/cargo" --version
-    target_libdir="$("$PROTUN_RUST_ROOT/bin/rustc" --print target-libdir --target aarch64-unknown-linux-musl)"
+    export PATH="/builder/staging_dir/host/bin:$TOOLS_RUST_ROOT/bin:$PATH"
+    "$TOOLS_RUST_ROOT/bin/rustc" --version | grep -F "rustc $RUST_VERSION "
+    "$TOOLS_RUST_ROOT/bin/cargo" --version
+    target_libdir="$("$TOOLS_RUST_ROOT/bin/rustc" --print target-libdir --target aarch64-unknown-linux-musl)"
     target_std=("$target_libdir"/libstd-*.rlib)
     if (( ${#target_std[@]} != 1 )); then
         echo 'Missing prebuilt ARM64 musl standard library' >&2
         exit 1
     fi
-    sdk_make=(make "PROTUN_RUST_ROOT=$PROTUN_RUST_ROOT" "PROTUN_BUILD_MODE=$PROTUN_BUILD_MODE")
+    sdk_make=(make "TOOLS_RUST_ROOT=$TOOLS_RUST_ROOT" "TOOLS_BUILD_MODE=$TOOLS_BUILD_MODE")
 }
 
 configure_sdk() {
@@ -66,6 +79,8 @@ configure_sdk() {
     if [[ ! -f rules.mk ]]; then
         bash ./setup.sh
     fi
+    # AWS-LC in the new libraries uses the SDK's existing host CMake.
+    test -x staging_dir/host/bin/cmake
 
     # Keep the SDK's Rust build flags and linker helpers at the reviewed revision.
     printf 'src-git packages https://github.com/openwrt/packages.git^%s\nsrc-link action /feed\n' \
@@ -73,29 +88,34 @@ configure_sdk() {
     ./scripts/feeds update -a
     test "$(git -C feeds/packages rev-parse HEAD)" = "$PACKAGES_COMMIT"
     "${sdk_make[@]}" defconfig
-    ./scripts/feeds install -f -p action protun
-
-    sed -i '/^CONFIG_PACKAGE_protun=/d; /^# CONFIG_PACKAGE_protun is not set$/d' .config
-    printf '\nCONFIG_PACKAGE_protun=m\n' >> .config
+    local package package_info
+    ./scripts/feeds install -f -p action "${packages[@]}"
+    for package in "${packages[@]}"; do
+        sed -i "/^CONFIG_PACKAGE_${package}=/d; /^# CONFIG_PACKAGE_${package} is not set$/d" .config
+        printf '\nCONFIG_PACKAGE_%s=m\n' "$package" >> .config
+    done
     "${sdk_make[@]}" defconfig
-    if ! grep -Eq '^CONFIG_PACKAGE_protun=[my]$' .config; then
-        echo 'Protun was not selected; refusing to report a skipped build as successful' >&2
-        exit 1
-    fi
-
-    # Check the evaluated package metadata before allowing an expensive compiler build.
-    package_info="$("${sdk_make[@]}" --no-print-directory -s -C package/feeds/action/protun TOPDIR=/builder DUMP=1)"
-    grep -qx 'Package: protun' <<< "$package_info"
-    if grep -Eq '^Build-Depends[^:]*:.*rust/host' <<< "$package_info"; then
-        echo 'The build still requires compiling Rust/LLVM; refusing to continue' >&2
-        exit 1
-    fi
+    for package in "${packages[@]}"; do
+        if ! grep -Eq "^CONFIG_PACKAGE_${package}=[my]$" .config; then
+            echo "$package was not selected; refusing a skipped build" >&2
+            exit 1
+        fi
+        package_info="$("${sdk_make[@]}" --no-print-directory -s -C "package/feeds/action/$package" TOPDIR=/builder DUMP=1)"
+        grep -qx "Package: $package" <<< "$package_info"
+        if grep -Eq '^Build-Depends[^:]*:.*rust/host' <<< "$package_info"; then
+            echo "$package still requires compiling Rust/LLVM; refusing to continue" >&2
+            exit 1
+        fi
+    done
 }
 
-compile_package() {
-    "${sdk_make[@]}" package/protun/download V=s
-    "${sdk_make[@]}" package/protun/check V=s
-    "${sdk_make[@]}" -j "$BUILD_JOBS" package/protun/compile V=s CONFIG_SIGNED_PACKAGES= CONFIG_AUTOREMOVE=
+compile_packages() {
+    local package
+    for package in "${packages[@]}"; do
+        "${sdk_make[@]}" "package/$package/download" V=s
+        "${sdk_make[@]}" "package/$package/check" V=s
+        "${sdk_make[@]}" -j "$BUILD_JOBS" "package/$package/compile" V=s CONFIG_SIGNED_PACKAGES= CONFIG_AUTOREMOVE=
+    done
 }
 
 verify_libraries() {
@@ -123,61 +143,74 @@ verify_libraries() {
         exit 1
     fi
     echo "Checking library loading with SDK musl: $loader"
-    "${compilers[0]}" -Wall -Wextra -Werror -O2 /ci/load-library.c -o /tmp/protun-load-test -ldl
+    "${compilers[0]}" -Wall -Wextra -Werror -O2 /ci/load-library.c -o /tmp/tools-load-test -ldl
 
     profile=release
     if grep -qx 'CONFIG_DEBUG=y' .config; then
         profile=debug
     fi
-    unpacked="$PROTUN_CARGO_TARGET_DIR/aarch64-unknown-linux-musl/$profile/libprotun.so"
-    if [[ ! -s $unpacked ]]; then
-        echo "Missing built Protun library: $unpacked" >&2
-        exit 1
-    fi
-
-    # Check the built library's dependencies independently of SDK package scanning.
+    local package basename symbol unpacked needed dependency library
     readelf="${compilers[0]%-gcc}-readelf"
-    needed="$("$readelf" -d "$unpacked" | sed -n 's/.*(NEEDED).*\[\([^]]*\)\].*/\1/p')"
-    if [[ -z $needed ]]; then
-        echo "No shared-library dependencies found in: $unpacked" >&2
-        exit 1
-    fi
-    while IFS= read -r dependency; do
-        case "$dependency" in
-            libc.so|libgcc_s.so.1) ;;
-            *)
-                echo "Undeclared runtime dependency: $dependency; update Package/protun/DEPENDS" >&2
-                exit 1
-                ;;
+    local -a staged
+    for package in "${packages[@]}"; do
+        case "$package" in
+            protun) basename=libprotun.so; symbol=ffi_protun_uniffi_contract_version ;;
+            tailscale-rs) basename=libtailscalers.so; symbol=ts_init ;;
+            local-agent-rs) basename=liblocal_agent_rs.so; symbol=ffi_local_agent_rs_uniffi_contract_version ;;
+            *) echo "Missing library check for $package" >&2; exit 1 ;;
         esac
-    done <<< "$needed"
+        unpacked="$TOOLS_CARGO_TARGET_DIR/aarch64-unknown-linux-musl/$profile/$basename"
+        if [[ ! -s $unpacked ]]; then
+            echo "Missing built library: $unpacked" >&2
+            exit 1
+        fi
 
-    mapfile -t staged < <(find build_dir -type f -path '*/ipkg-*/protun/usr/lib/libprotun.so')
-    if (( ${#staged[@]} != 1 )); then
-        echo 'Expected one staged Protun shared library' >&2
-        exit 1
-    fi
-    for library in "$unpacked" "${staged[0]}"; do
-        "$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
-            /tmp/protun-load-test "$(realpath "$library")"
+        # Check the built library's dependencies independently of SDK package scanning.
+        needed="$("$readelf" -d "$unpacked" | sed -n 's/.*(NEEDED).*\[\([^]]*\)\].*/\1/p')"
+        if [[ -z $needed ]]; then
+            echo "No shared-library dependencies found in: $unpacked" >&2
+            exit 1
+        fi
+        while IFS= read -r dependency; do
+            case "$dependency" in
+                libc.so|libgcc_s.so.1) ;;
+                *)
+                    echo "Undeclared runtime dependency: $dependency; update Package/$package/DEPENDS" >&2
+                    exit 1
+                    ;;
+            esac
+        done <<< "$needed"
+
+        mapfile -t staged < <(find build_dir -type f -path "*/ipkg-*/$package/usr/lib/$basename")
+        if (( ${#staged[@]} != 1 )); then
+            echo "Expected one staged $package shared library" >&2
+            exit 1
+        fi
+        for library in "$unpacked" "${staged[0]}"; do
+            "$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
+                /tmp/tools-load-test "$(realpath "$library")" "$symbol"
+        done
     done
 }
 
-export_apk() {
-    mapfile -t packages < <(find bin/packages -type f -name 'protun-*.apk')
-    if (( ${#packages[@]} != 1 )); then
-        echo 'Expected exactly one Protun APK' >&2
-        exit 1
-    fi
-    cp "${packages[0]}" /out/
-    local package_bytes
-    package_bytes=$(stat -c %s "${packages[0]}")
-    echo "Exported ${packages[0]##*/}: $package_bytes bytes"
+export_apks() {
+    local package
+    local -a matches exports=()
+    for package in "${packages[@]}"; do
+        mapfile -t matches < <(find bin/packages -type f -name "$package-*.apk")
+        if (( ${#matches[@]} != 1 )); then
+            echo "Expected exactly one $package APK" >&2
+            exit 1
+        fi
+        exports+=("${matches[0]}")
+    done
+    cp -- "${exports[@]}" /out/
+    printf 'Exported %s\n' "${exports[@]}"
 }
 
 cd /builder
 run_phase 'Preflight' preflight
 run_phase 'SDK feeds and configuration' configure_sdk
-run_phase 'Compile and package' compile_package
+run_phase 'Compile and package' compile_packages
 run_phase 'ARM64 library checks' verify_libraries
-run_phase 'Export APK' export_apk
+run_phase 'Export APKs' export_apks

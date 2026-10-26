@@ -1,4 +1,7 @@
 *.sh text eol=lf
+*.py text eol=lf
+*.mk text eol=lf
+*.c text eol=lf
 *.yml text eol=lf
 *.patch text eol=lf whitespace=-blank-at-eol
 Makefile text eol=lf
