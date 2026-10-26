@@ -68,5 +68,3 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/lib
 	$(INSTALL_BIN) $(TOOLS_CARGO_TARGET_DIR)/$(RUSTC_TARGET_ARCH)/$(CARGO_OUTPUT_DIR)/$(TOOLS_LIBRARY) $(1)/usr/lib/
 endef
-
-$(eval $(call BuildPackage,$(PKG_NAME)))

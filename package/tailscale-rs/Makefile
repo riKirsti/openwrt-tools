@@ -1,4 +1,5 @@
 TOOLS_PACKAGE_DIR:=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+SCAN_DEPS = ../rust-library.mk
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=tailscale-rs
@@ -19,3 +20,5 @@ TOOLS_LIBRARY:=libtailscalers.so
 TOOLS_CRATE:=ts_ffi
 
 include $(TOOLS_PACKAGE_DIR)../rust-library.mk
+
+$(eval $(call BuildPackage,$(PKG_NAME)))

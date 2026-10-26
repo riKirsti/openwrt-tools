@@ -1,4 +1,5 @@
 TOOLS_PACKAGE_DIR:=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+SCAN_DEPS = ../rust-library.mk
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=local-agent-rs
@@ -20,3 +21,5 @@ TOOLS_MANIFEST:=local_agent_rs/Cargo.toml
 TOOLS_FEATURES:=uniffi
 
 include $(TOOLS_PACKAGE_DIR)../rust-library.mk
+
+$(eval $(call BuildPackage,$(PKG_NAME)))

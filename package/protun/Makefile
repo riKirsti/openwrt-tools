@@ -1,4 +1,5 @@
 TOOLS_PACKAGE_DIR:=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+SCAN_DEPS = ../rust-library.mk
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=protun
@@ -19,3 +20,5 @@ TOOLS_LIBRARY:=libprotun.so
 TOOLS_FEATURES:=linux
 
 include $(TOOLS_PACKAGE_DIR)../rust-library.mk
+
+$(eval $(call BuildPackage,$(PKG_NAME)))
