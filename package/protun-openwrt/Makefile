@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=protun-openwrt
 PKG_VERSION:=3.0.5
-PKG_RELEASE:=7
+PKG_RELEASE:=8
 
 PKG_SOURCE:=protun-$(PKG_VERSION).tar.gz
 PKG_BUILD_DIR:=$(BUILD_DIR)/protun-$(PKG_VERSION)

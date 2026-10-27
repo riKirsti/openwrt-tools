@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -e
 umask 077
 . /usr/lib/exit-node-common
 case "${1:-}" in
