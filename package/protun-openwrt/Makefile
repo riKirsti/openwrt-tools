@@ -2,22 +2,22 @@ TOOLS_PACKAGE_DIR:=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 SCAN_DEPS = ../rust-library.mk
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=protun
+PKG_NAME:=protun-openwrt
 PKG_VERSION:=3.0.5
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+PKG_SOURCE:=protun-$(PKG_VERSION).tar.gz
+PKG_BUILD_DIR:=$(BUILD_DIR)/protun-$(PKG_VERSION)
 PKG_SOURCE_URL:=https://codeload.github.com/ProtonVPN/protun/tar.gz/v$(PKG_VERSION)?
 PKG_HASH:=a95a3cce00cfb48f604c65fc21f985b751c4b04a19beb03917f61bb0379d70ee
 
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 
-TOOLS_TITLE:=Proton VPN core library and Stealth client
+TOOLS_TITLE:=Proton VPN Stealth client
 TOOLS_URL:=https://github.com/ProtonVPN/protun
-TOOLS_DESCRIPTION:=Proton VPN core library and an experimental OpenWrt Stealth client.
-TOOLS_LIBRARY:=libprotun.so
-TOOLS_FEATURES:=linux
+TOOLS_DESCRIPTION:=Experimental OpenWrt Stealth client using the Proton VPN core.
+TOOLS_CRATE:=protun
 TOOLS_DEPENDS:=+kmod-tun +jsonfilter
 
 define TOOLS_EXTRA_PREPARE
@@ -42,7 +42,16 @@ endef
 
 include $(TOOLS_PACKAGE_DIR)../rust-library.mk
 
-define Package/protun/conffiles
+# This package installs only a binary; override the helper's library targets.
+define Build/Compile
+	$(TOOLS_EXTRA_COMPILE)
+endef
+
+define Package/$(PKG_NAME)/install
+	$(TOOLS_EXTRA_INSTALL)
+endef
+
+define Package/$(PKG_NAME)/conffiles
 /etc/config/protun
 /etc/protun/
 endef

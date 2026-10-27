@@ -1,15 +1,15 @@
 # OpenWrt tools
 
-Build three Rust shared-library APKs for an ARM64 Cortex-A53 router:
+Build a Stealth client and two Rust library APKs for an ARM64 Cortex-A53 router:
 
-| Package | Installed library |
+| Package | Installed program or library |
 | --- | --- |
-| `protun` | `/usr/lib/libprotun.so`, plus `/usr/sbin/protun-openwrt` |
+| `protun-openwrt` | `/usr/sbin/protun-openwrt` |
 | `tailscale-rs` | `/usr/lib/libtailscalers.so` |
 | `local-agent-rs` | `/usr/lib/liblocal_agent_rs.so` |
 
-Applications use these libraries through their upstream interfaces. The `protun`
-APK also includes an experimental Stealth client and a disabled OpenWrt service.
+Applications use these libraries through their upstream interfaces. The `protun-openwrt`
+APK includes the experimental Stealth client and a disabled OpenWrt service.
 See [Stealth setup and verification](docs/stealth.md). Installing the package
 does not migrate a WireGuard interface or change ZeroTier, routing, DNS or firewall
 configuration. The other two APKs contain libraries, not runnable VPN services.

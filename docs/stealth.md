@@ -4,7 +4,7 @@ Purpose: replace the travel router's Proton WireGuard connection with Stealth
 while retaining the existing ZeroTier connection to the home router and the
 same traffic-selection policy. Nothing in this package configures ZeroTier.
 
-The `protun` APK includes the library, `protun-openwrt`, and an OpenWrt `procd`
+The `protun-openwrt` APK includes the `protun-openwrt` executable and an OpenWrt `procd`
 service. The service is disabled by default. No installation script rewrites
 `/etc/config/network`, firewall, DNS, PBR, or ZeroTier configuration.
 
@@ -37,7 +37,11 @@ new command. Its existing APK is not a complete runnable Local Agent client.
 1. Keep a backup of the current network, firewall, PBR and DNS configuration,
    and keep the working WireGuard setup available for rollback. Leave ZeroTier
    and the home router unchanged.
-2. Install the newly built `protun` APK. Copy
+2. Install the newly built `protun-openwrt` APK. If the old `protun` package is
+   installed, back up `/etc/protun` and `/etc/config/protun`, stop its service,
+   and remove the old package before installing the renamed package to avoid
+   overlapping file ownership. Keep the service and configuration names `protun`.
+   The new APK does not include or need `libprotun.so`. Copy
    `/etc/protun/client.json.example` to `/etc/protun/client.json` and replace the
    placeholders. The example endpoint `192.0.2.1` is documentation-only.
 3. Put the **Proton WireGuard private key**, as one base64 line, in

@@ -155,7 +155,7 @@ verify_libraries() {
     local -a staged
     for package in "${packages[@]}"; do
         case "$package" in
-            protun) basename=libprotun.so; symbol=ffi_protun_uniffi_contract_version ;;
+            protun-openwrt) continue ;; # Checked as an executable below.
             tailscale-rs) basename=libtailscalers.so; symbol=ts_init ;;
             local-agent-rs) basename=liblocal_agent_rs.so; symbol=ffi_local_agent_rs_uniffi_contract_version ;;
             *) echo "Missing library check for $package" >&2; exit 1 ;;
@@ -211,13 +211,17 @@ export_apks() {
 
 verify_client() {
     local -a clients
-    mapfile -t clients < <(find build_dir -type f -path '*/ipkg-*/protun/usr/sbin/protun-openwrt')
+    mapfile -t clients < <(find build_dir -type f -path '*/ipkg-*/protun-openwrt/usr/sbin/protun-openwrt')
     if (( ${#clients[@]} != 1 )); then
         echo 'Expected one staged Stealth client' >&2
         exit 1
     fi
     local client fixture key needed dependency
     client="$(realpath "${clients[0]}")"
+    if find "${client%/usr/sbin/protun-openwrt}" -type f -name libprotun.so | grep -q .; then
+        echo 'Client-only package unexpectedly contains libprotun.so' >&2
+        exit 1
+    fi
     needed="$("$readelf" -d "$client" | sed -n 's/.*(NEEDED).*\[\([^]]*\)\].*/\1/p')"
     if [[ -z $needed ]]; then
         echo 'Expected the client to use the SDK shared runtime' >&2
