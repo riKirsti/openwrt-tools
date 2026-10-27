@@ -7,7 +7,7 @@ vpn_context() {
   *) return 2;;
  esac
 }
-vpn_engine_ready() {
+vpn_engine_live() {
  local latest now pid boot instance configured
  if [ "$VPN_BACKEND" = wireguard ]; then
   ip -o link show dev wg-proton 2>/dev/null | grep -Eq '<([^>]*,)?UP(,|>)' || return 1
@@ -28,6 +28,9 @@ vpn_engine_ready() {
  pid="$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.pid')"
  unsigned_integer "$pid" && kill -0 "$pid" 2>/dev/null || return 1
  [ "$(cat /proc/"$pid"/comm 2>/dev/null)" = protun-openwrt ] || return 1
+}
+vpn_engine_ready() {
+ vpn_engine_live || return 1
  ip -o link show dev "$VPN_DEV" 2>/dev/null | grep -Eq '<([^>]*,)?UP(,|>)'
 }
 vpn_ready() {
