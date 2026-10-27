@@ -1,6 +1,6 @@
 #!/bin/sh
 # This endpoint is public; no account credentials are read or sent.
-set -eu
+set -e
 umask 077
 state=/root/proton-private
 run=/tmp/proton-runtime

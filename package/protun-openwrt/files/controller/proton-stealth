@@ -1,6 +1,6 @@
 #!/bin/sh
 # The transaction controller installs dual-family guards before prepare.
-set -eu
+set -e
 umask 077
 . /usr/lib/exit-node-common
 state=/root/proton-private
