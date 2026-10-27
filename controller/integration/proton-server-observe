@@ -30,6 +30,20 @@ case "$event" in
  *) exit 2;;
 esac
 [ "$network" = "$(jsonfilter -i "$PROTON_RUNTIME/node-state.json" -e '@.network_id')" ] || exit 0
+# Re-read the physical network without scans or changing the published state.
+# A cached UI network ID alone can lag a roaming or uplink change.
+current_network_id() {
+ local active_dev kind gateway mac ssid=''
+ active_dev="$(uplink_device)" || return 1
+ kind="$(uplink_kind "$active_dev")"
+ if [ "$kind" = wifi ]; then ssid="$(iw dev "$active_dev" link 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p')"; fi
+ gateway="$(uplink_gateway "$active_dev")"
+ mac="$(ip neigh show to "$gateway" dev "$active_dev" | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="lladdr") print $(i+1)}')"
+ . /usr/share/libubox/jshn.sh
+ json_init; json_add_string kind "$kind"; json_add_string ssid "$ssid"; json_add_string gateway_mac "$mac"; json_add_string gateway_ip "$gateway"
+ json_dump | /usr/libexec/proton-node-state network-id
+}
+[ "$network" = "$(current_network_id)" ] || exit 0
 ip="$(sed -n 's/^Endpoint[[:space:]]*=[[:space:]]*//p' "$file")"; ip="${ip%:*}"
 key="$(sed -n 's/^PublicKey[[:space:]]*=[[:space:]]*//p' "$file")"
 [ "$ip" = "$(jsonfilter -i "$PROTON_RUNTIME/stealth.json" -e '@.server_ip')" ] || exit 0

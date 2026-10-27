@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -184,6 +185,15 @@ func save(path string, s Store) error {
 // Saving a preference does not change routing; the transaction controller
 // must apply and verify it before reporting success.
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "network-id" {
+		var n Network
+		if e := json.NewDecoder(io.LimitReader(os.Stdin, 4096)).Decode(&n); e != nil {
+			fmt.Fprintln(os.Stderr, "invalid network identity")
+			os.Exit(1)
+		}
+		fmt.Println(networkID(n))
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "observe" {
 		if e := observeCLI(os.Args[2:]); e != nil {
 			fmt.Fprintln(os.Stderr, e)
