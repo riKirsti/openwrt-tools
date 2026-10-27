@@ -36,7 +36,7 @@ define Package/$(PKG_NAME)
   CATEGORY:=Network
   TITLE:=$(TOOLS_TITLE)
   URL:=$(TOOLS_URL)
-  DEPENDS:=$(RUST_ARCH_DEPENDS) +libgcc
+  DEPENDS:=$(RUST_ARCH_DEPENDS) +libgcc $(TOOLS_DEPENDS)
 endef
 
 define Package/$(PKG_NAME)/description
@@ -46,25 +46,27 @@ endef
 define Build/Prepare
 	$(call Build/Prepare/Default)
 	$(CP) ./files/Cargo.lock $(PKG_BUILD_DIR)/$(dir $(TOOLS_MANIFEST))Cargo.lock
+	$(TOOLS_EXTRA_PREPARE)
 endef
+
+TOOLS_CARGO_ENV = $(CARGO_PKG_VARS) $(TOOLS_PROFILE_VARS) \
+	TARGET_AR="$(TARGET_AR)" TARGET_CXX="$(TARGET_CXX_NOCACHE)" \
+	TARGET_CXXFLAGS="$(TARGET_CXXFLAGS) $(RUSTC_CFLAGS)" $(TOOLS_RUST_VARS)
 
 define Build/Compile
 	+cd $(PKG_BUILD_DIR) && \
-		$(CARGO_PKG_VARS) \
-		$(TOOLS_PROFILE_VARS) \
-		TARGET_AR="$(TARGET_AR)" \
-		TARGET_CXX="$(TARGET_CXX_NOCACHE)" \
-		TARGET_CXXFLAGS="$(TARGET_CXXFLAGS) $(RUSTC_CFLAGS)" \
-		$(TOOLS_RUST_VARS) \
+		$(TOOLS_CARGO_ENV) \
 		$(TOOLS_CARGO) rustc -v --locked --lib --crate-type cdylib \
 			--package $(TOOLS_CRATE) --manifest-path $(TOOLS_MANIFEST) \
 			--profile $(CARGO_PKG_PROFILE) \
 			$(if $(TOOLS_FEATURES),--features $(TOOLS_FEATURES)) \
 			--target-dir $(TOOLS_CARGO_TARGET_DIR) \
 			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1)
+	$(TOOLS_EXTRA_COMPILE)
 endef
 
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/lib
 	$(INSTALL_BIN) $(TOOLS_CARGO_TARGET_DIR)/$(RUSTC_TARGET_ARCH)/$(CARGO_OUTPUT_DIR)/$(TOOLS_LIBRARY) $(1)/usr/lib/
+	$(TOOLS_EXTRA_INSTALL)
 endef

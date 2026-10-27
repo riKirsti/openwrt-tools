@@ -94,7 +94,8 @@ def sdk_available(architecture, release):
 # Repository tags and the actual Rust build targets are not always the same version.
 PROJECTS = {
     "protun": {"repository": "ProtonVPN/protun", "crate": "protun",
-               "manifest": "Cargo.toml", "release_manifest": "Cargo.toml", "features": ["linux"]},
+               "manifest": "Cargo.toml", "release_manifest": "Cargo.toml",
+               "features": ["linux", "openwrt-client"]},
     "tailscale-rs": {"repository": "tailscale/tailscale-rs", "crate": "ts_ffi",
                      "manifest": "Cargo.toml", "release_manifest": "Cargo.toml", "features": []},
     "local-agent-rs": {"repository": "ProtonVPN/local-agent-rs", "crate": "local-agent-rs",
@@ -131,6 +132,8 @@ def updated_source(root, name, tag, cargo, rust_version):
         for patch in sorted((root / "package" / name / "patches").glob("*.patch")):
             subprocess.run(["git", "apply", "--check", str(patch)], cwd=source, check=True)
             subprocess.run(["git", "apply", str(patch)], cwd=source, check=True)
+        if name == "protun":
+            shutil.copyfile(root / "package/protun/files/openwrt-client.rs", source / "openwrt-client.rs")
         build_source = (source / project["manifest"]).parent
         shutil.copyfile(root / "package" / name / "files/Cargo.lock", build_source / "Cargo.lock")
         # Retain existing dependencies wherever the new manifest permits them.

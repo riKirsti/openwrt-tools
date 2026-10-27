@@ -2,6 +2,9 @@
 *.py text eol=lf
 *.mk text eol=lf
 *.c text eol=lf
+*.rs text eol=lf
+*.init text eol=lf
+*.config text eol=lf
 *.yml text eol=lf
 *.patch text eol=lf whitespace=-blank-at-eol
 Makefile text eol=lf

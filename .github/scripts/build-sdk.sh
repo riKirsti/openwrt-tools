@@ -209,9 +209,67 @@ export_apks() {
     printf 'Exported %s\n' "${exports[@]}"
 }
 
+verify_client() {
+    local -a clients
+    mapfile -t clients < <(find build_dir -type f -path '*/ipkg-*/protun/usr/sbin/protun-openwrt')
+    if (( ${#clients[@]} != 1 )); then
+        echo 'Expected one staged Stealth client' >&2
+        exit 1
+    fi
+    local client fixture key needed dependency
+    client="$(realpath "${clients[0]}")"
+    needed="$("$readelf" -d "$client" | sed -n 's/.*(NEEDED).*\[\([^]]*\)\].*/\1/p')"
+    if [[ -z $needed ]]; then
+        echo 'Expected the client to use the SDK shared runtime' >&2
+        exit 1
+    fi
+    while IFS= read -r dependency; do
+        case "$dependency" in
+            libc.so|libgcc_s.so.1) ;;
+            *) echo "Undeclared client dependency: $dependency" >&2; exit 1 ;;
+        esac
+    done <<< "$needed"
+    fixture=$(mktemp -d)
+    key='AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='
+    printf '%s\n' "$key" > "$fixture/private.key"
+    chmod 600 "$fixture/private.key"
+    printf '{"tun_name":"protun0","uplink_device":"eth0","server_ip":"192.0.2.1","server_public_key":"%s","private_key_file":"%s/private.key","tls_port":443,"connect_timeout_seconds":60}\n' \
+        "$key" "$fixture" > "$fixture/client.json"
+    chmod 600 "$fixture/client.json"
+    local -a run_client=("$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" "$client")
+    "${run_client[@]}" --help
+    "${run_client[@]}" --check-config "$fixture/client.json"
+    sed 's/}$/,"unsupported":true}/' "$fixture/client.json" > "$fixture/unknown.json"
+    if "${run_client[@]}" --check-config "$fixture/unknown.json"; then
+        echo 'Client accepted an unknown configuration field' >&2
+        exit 1
+    fi
+    ln -s "$fixture/private.key" "$fixture/linked.key"
+    sed "s|$fixture/private.key|$fixture/linked.key|" "$fixture/client.json" > "$fixture/symlink.json"
+    if "${run_client[@]}" --check-config "$fixture/symlink.json"; then
+        echo 'Client accepted a symlinked private key' >&2
+        exit 1
+    fi
+    chmod 644 "$fixture/private.key"
+    if "${run_client[@]}" --check-config "$fixture/client.json"; then
+        echo 'Client accepted an exposed private key' >&2
+        exit 1
+    fi
+    chmod 600 "$fixture/private.key"
+    printf '%s\n' 'invalid-key' > "$fixture/private.key"
+    if "${run_client[@]}" --check-config "$fixture/client.json"; then
+        echo 'Client accepted an invalid private key' >&2
+        exit 1
+    fi
+    rm -- "$fixture/client.json" "$fixture/private.key" "$fixture/unknown.json" "$fixture/symlink.json" "$fixture/linked.key"
+    rmdir -- "$fixture"
+    echo 'ARM64 client starts and accepts/rejects configuration as expected; no network session tested'
+}
+
 cd /builder
 run_phase 'Preflight' preflight
 run_phase 'SDK feeds and configuration' configure_sdk
 run_phase 'Compile and package' compile_packages
 run_phase 'ARM64 library checks' verify_libraries
+run_phase 'ARM64 Stealth client checks' verify_client
 run_phase 'Export APKs' export_apks

@@ -1,0 +1,25 @@
+Subject: Add an opt-in OpenWrt client binary using the public Protun API
+
+The package's explicit cargo rustc command still builds the installed cdylib.
+Use only rlib as Cargo's default so building the client does not also produce
+an unused static archive and another shared library.
+
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,2 +1,7 @@
++[[bin]]
++name = "protun-openwrt"
++path = "openwrt-client.rs"
++required-features = ["openwrt-client"]
++
+ [package]
+ name = "protun"
+@@ -6,3 +11,3 @@
+ [lib]
+-crate-type = ["cdylib", "staticlib", "rlib"]
++crate-type = ["rlib"]
+ 
+@@ -71,2 +76,3 @@
+ [features]
++openwrt-client = ["linux", "dep:base64", "dep:serde", "dep:serde_json"]
+ bindgen-cli = ["uniffi", "uniffi/cli"]
