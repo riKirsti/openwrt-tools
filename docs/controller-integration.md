@@ -32,7 +32,11 @@ fallback to UDP/plain TCP or Direct.
 The adapter retains the existing controller's locks, transaction/credential ownership,
 tables 600/610/620, physical transport mark 0x621, DNS selection and ZeroTier binding.
 Procd supervises the new process with 30-second unlimited retries; the existing
-controller reconciles policy after TUN recreation. The new service does not start a
+controller reconciles policy after TUN recreation. Transport health checks also
+restore the dynamic netifd interface, addresses, and transport routes when procd
+recreates a TUN; netifd removes a dynamic interface when its previous device
+disappears. This repair does not change LAN selectors or the selected Internet
+mode. HTTPS retries have an explicit total retry-time limit. The new service does not start a
 VPN at boot: the existing Direct-on-boot behavior remains authoritative.
 
 The wrapper creates the exclusive nonpersistent TUN and applies `tun_mtu` through

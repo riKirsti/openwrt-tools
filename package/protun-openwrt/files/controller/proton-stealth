@@ -19,6 +19,34 @@ stop_tunnel() {
  done
  rm -f "$PROTON_RUNTIME/stealth-state.json" "$PROTON_RUNTIME/stealth-health.json" "$PROTON_RUNTIME/stealth.json" "$PROTON_RUNTIME/stealth.key"
 }
+add_tun_interface() {
+ . /usr/share/libubox/jshn.sh
+  json_init; json_add_string name proton_stealth; json_add_string proto static; json_add_string device "$dev"
+  json_add_boolean defaultroute 0; json_add_boolean peerdns 0; json_add_boolean delegate 0
+  json_add_array ipaddr; json_add_string '' '10.2.0.2/32'; json_close_array
+  json_add_array ip6addr; json_add_string '' '2a07:b944::2:2/128'; json_close_array
+  ubus call network add_dynamic "$(json_dump)" >/dev/null
+}
+restore_tun_interface() {
+ local iface attempt
+ [ "$(uci -q get exitnode.main.proton_backend || echo wireguard)" = stealth ] || return 1
+ [ -f "$PROTON_RUNTIME/stealth-wanted" ] || return 1
+ # netifd removes dynamic logical interfaces when their TUN device disappears.
+ # A supervised client can reconnect before host addressing has been restored.
+ if iface="$(ubus call network.interface.proton_stealth status 2>/dev/null)"; then
+  [ "$(jsonfilter -s "$iface" -e '@.up')" = true ] || ubus call network.interface.proton_stealth up >/dev/null || return 1
+ else
+  add_tun_interface || return 1
+ fi
+ for attempt in 1 2 3; do
+  if ip -o address show dev "$dev" 2>/dev/null | grep -q '10.2.0.2/32' && ip -6 -o address show dev "$dev" 2>/dev/null | grep -q '2a07:b944::2:2/128'; then
+   vpn_reconcile true
+   return
+  fi
+  sleep 1
+ done
+ return 1
+}
 case "${1:-}" in
  prepare)
   file="${2:-$state/active.conf}"
@@ -58,11 +86,7 @@ case "${1:-}" in
    ip -"$family" rule show | grep -q '^9000:.*fwmark 0x621.*lookup main' || ip -"$family" rule add pref 9000 fwmark 0x621 lookup main
    ip -"$family" rule show | grep -q '^10600:.*fwmark 0x620.*lookup 620' || ip -"$family" rule add pref 10600 fwmark 0x620 lookup 620
   done
-  json_init; json_add_string name proton_stealth; json_add_string proto static; json_add_string device "$dev"
-  json_add_boolean defaultroute 0; json_add_boolean peerdns 0; json_add_boolean delegate 0
-  json_add_array ipaddr; json_add_string '' '10.2.0.2/32'; json_close_array
-  json_add_array ip6addr; json_add_string '' '2a07:b944::2:2/128'; json_close_array
-  ubus call network add_dynamic "$(json_dump)" >/dev/null
+  add_tun_interface
   : > "$PROTON_RUNTIME/stealth-wanted"
   /etc/init.d/proton-stealth start 9>&- >/dev/null
   up=false
@@ -82,8 +106,10 @@ case "${1:-}" in
   if [ "$1" = health ]; then try_lock 7 || exit 0; else wait_lock 7 60 || exit 1; fi
   ready=false
   limit=40; [ "$1" != health ] || limit=1
-  for attempt in $(seq 1 "$limit"); do if vpn_engine_ready; then ready=true; break; fi; sleep 1; done
+  for attempt in $(seq 1 "$limit"); do if vpn_engine_live; then ready=true; break; fi; sleep 1; done
   [ "$ready" = true ] || exit 1
+  restore_tun_interface || exit 1
+  vpn_engine_ready || exit 1
   probe_pid="$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.pid')"
   probe_instance="$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.instance')"
   invalidate_health() {
@@ -91,7 +117,7 @@ case "${1:-}" in
   }
   for family in 4 6; do
    if [ "$family" = 4 ]; then target='one.one.one.one:443:1.1.1.1'; else target='one.one.one.one:443:[2606:4700:4700::1111]'; fi
-   curl -"$family" --interface "$dev" --retry 2 --retry-delay 2 --retry-all-errors --connect-timeout 5 --max-time 8 -fsS --resolve "$target" https://one.one.one.one/cdn-cgi/trace > "$state/health$family.trace" 7>&- || { invalidate_health; exit 1; }
+   curl -"$family" --interface "$dev" --retry 2 --retry-delay 2 --retry-all-errors --retry-max-time 20 --connect-timeout 5 --max-time 8 -fsS --resolve "$target" https://one.one.one.one/cdn-cgi/trace > "$state/health$family.trace" 7>&- || { invalidate_health; exit 1; }
    grep -q '^ip=' "$state/health$family.trace" || { invalidate_health; exit 1; }
   done
   vpn_engine_ready || exit 1
