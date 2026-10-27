@@ -118,6 +118,14 @@ jobs:
             "$RESOLVED_SDK_IMAGE" /ci/build-sdk.sh
           echo "SDK build and checks: $((SECONDS - started))s" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Upload verified APKs for review and device testing
+        uses: actions/upload-artifact@v7
+        with:
+          name: openwrt-tools-${{ github.sha }}
+          path: ${{ runner.temp }}/tools-apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Restore cache ownership for the runner
         if: always()
         shell: bash
