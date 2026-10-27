@@ -52,8 +52,19 @@ case "${1:-}" in
   file="${2:-$state/active.conf}"
   case "$file" in "$state/active.conf"|"$state/pending.conf") ;; *) exit 2;; esac
   stop_tunnel
-  /usr/libexec/proton-transport-metadata >/dev/null 2>&1 || true
-  [ -s "$state/transport-ports.json" ] || { echo 'Verified Stealth transport metadata is unavailable' >&2; exit 1; }
+  ports=''
+  if [ "$(sed -n 's/^# TransportProtocol = //p' "$file")" = stealth ]; then
+   declared="$(sed -n 's/^# TransportPorts = //p' "$file")"
+   if [ -n "$declared" ]; then
+    case "$declared" in *[!0-9,]*|,*|*,|*,,*) echo 'Invalid server transport ports' >&2; exit 1;; esac
+    ports="$(printf '%s' "$declared" | tr ',' ' ')"
+   fi
+  fi
+  if [ -z "$ports" ]; then
+   /usr/libexec/proton-transport-metadata >/dev/null 2>&1 || true
+   [ -s "$state/transport-ports.json" ] || { echo 'Verified Stealth transport metadata is unavailable' >&2; exit 1; }
+   ports="$(jsonfilter -i "$state/transport-ports.json" -e '@.tls_ports[*]')"
+  fi
   uplink="$(uplink_device)" || exit 1
   endpoint="$(sed -n 's/^Endpoint[[:space:]]*=[[:space:]]*//p' "$file")"
   server_ip="${endpoint%:*}"
@@ -68,7 +79,7 @@ case "${1:-}" in
   json_add_string server_public_key "$public"; json_add_string private_key_file "$PROTON_RUNTIME/stealth.key"
   json_add_int connect_timeout_seconds 60; json_add_array tls_ports
   count=0
-  for port in $(jsonfilter -i "$state/transport-ports.json" -e '@.tls_ports[*]'); do
+  for port in $ports; do
    case "$port" in ''|*[!0-9]*) exit 1;; esac
    [ "${#port}" -le 5 ] && [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || exit 1
    count=$((count+1)); [ "$count" -le 16 ] || exit 1; json_add_int '' "$port"
