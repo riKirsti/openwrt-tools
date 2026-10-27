@@ -155,7 +155,7 @@ verify_libraries() {
     local -a staged
     for package in "${packages[@]}"; do
         case "$package" in
-            protun-openwrt|proton-stealth-integration) continue ;; # Executable / shell integration checks below.
+            protun-openwrt) continue ;; # Executable / shell integration checks below.
             tailscale-rs) basename=libtailscalers.so; symbol=ts_init ;;
             local-agent-rs) basename=liblocal_agent_rs.so; symbol=ffi_local_agent_rs_uniffi_contract_version ;;
             *) echo "Missing library check for $package" >&2; exit 1 ;;
@@ -302,9 +302,9 @@ PY
 verify_integration() {
     local -a roots
     local root script
-    mapfile -t roots < <(find build_dir -type d -path '*/ipkg-*/proton-stealth-integration')
+    mapfile -t roots < <(find build_dir -type d -path '*/ipkg-*/protun-openwrt')
     if (( ${#roots[@]} != 1 )); then
-        echo 'Expected one staged Stealth integration package' >&2; exit 1
+        echo 'Expected one staged protocol client package' >&2; exit 1
     fi
     root=${roots[0]}
     for script in usr/lib/exitnode/backend.sh usr/libexec/proton-tunnel usr/libexec/proton-stealth usr/libexec/proton-transport-metadata etc/init.d/proton-stealth; do
@@ -320,5 +320,5 @@ run_phase 'SDK feeds and configuration' configure_sdk
 run_phase 'Compile and package' compile_packages
 run_phase 'ARM64 library checks' verify_libraries
 run_phase 'ARM64 protocol client checks' verify_client
-run_phase 'Stealth integration checks' verify_integration
+run_phase 'Controller integration checks' verify_integration
 run_phase 'Export APKs' export_apks

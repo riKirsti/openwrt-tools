@@ -1,13 +1,27 @@
-# Proton Stealth integration for OpenWrt
+# Optional controller integration
 
-This optional package adapts `protun-openwrt` to compatible exit-node controllers.
+`protun-openwrt` includes optional scripts for compatible exit-node controllers.
+There is no separate integration package. The standard client supports WireGuard
+UDP, WireGuard TCP, Stealth, and automatic selection; `protocol` selects the
+transport, with Stealth as its default. The optional controller adapter currently
+selects either the existing kernel WireGuard backend or the Stealth client backend.
+It does not yet expose client TCP/automatic selection in the controller UI.
 It is independent of router brand and deployment role. It is not a standalone
 network manager: the host controller must provide `/usr/lib/exit-node-common`,
 its locking and transaction functions, the expected runtime state, and its
-credential lifecycle. Installation does not rewrite policies or select a backend.
+credential lifecycle. Installation does not rewrite policies or select a backend. Existing controller
+commands and runtime paths are retained for compatibility. The integration service
+is controller-requested only and its boot handler does nothing; it does not replace
+the normal, disabled-by-default `protun` service. Enable only one owner of a given
+tunnel: use either the standard service or the controller-managed service.
 Device-specific controller patches, configuration snapshots, and source fingerprints
 are intentionally excluded from this repository and package. Integrators must
 review their controller's compatibility before enabling this adapter.
+
+The optional helpers require the controller's existing HTTPS-capable `curl`,
+`ip-full`, `flock`, `ubus`, and libubox JSON shell functions. They do not add these
+controller-only prerequisites to the standalone client's dependency set. Verify
+those tools before activating integration; keep HTTPS certificate checking enabled.
 
 The legacy `wireguard` preference field remains the compatible VPN on/off switch.
 The new `exitnode.main.proton_backend` chooses `wireguard` or `stealth`; the runtime
