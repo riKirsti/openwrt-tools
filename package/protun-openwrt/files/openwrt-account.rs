@@ -11,6 +11,8 @@ use muon::{
     store::Store,
 };
 use serde_json::{Value, json};
+#[cfg(not(test))]
+use std::os::unix::net::UnixStream;
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, OpenOptions},
@@ -18,10 +20,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::{
         fd::AsRawFd,
-        unix::{
-            fs::{MetadataExt, OpenOptionsExt},
-            net::UnixStream,
-        },
+        unix::fs::{MetadataExt, OpenOptionsExt},
     },
     path::{Path, PathBuf},
     sync::{
@@ -494,7 +493,10 @@ fn api_error(error: muon::Error) -> io::Error {
     {
         failure("PROTON_REAUTH_REQUIRED: authorization rejected")
     } else {
-        failure("Proton API network request failed")
+        failure(&format!(
+            "Proton API network request failed ({:?})",
+            error.kind()
+        ))
     }
 }
 fn stdin_password() -> io::Result<String> {
@@ -533,8 +535,12 @@ impl<C: Context> Api<C> {
             "DELETE" => muon::http::Method::DELETE,
             _ => return Err(failure("Invalid API method")),
         };
+        let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let mut request =
-            ProtonRequest::new(method, path).retry_policy(RetryPolicy::default().never());
+            ProtonRequest::new(method, route).retry_policy(RetryPolicy::default().never());
+        for (key, value) in pvpnclient::url::form_urlencoded::parse(query.as_bytes()) {
+            request = request.query((key.as_ref(), value.as_ref()));
+        }
         for (key, value) in headers {
             request = request.header((*key, *value));
         }
@@ -580,6 +586,7 @@ impl<C: Context> Api<C> {
         let location = self.call("GET", "/vpn/v1/location", None, &[]).await.ok();
         let mut netzone = String::new();
         if let Some(value) = location {
+            #[cfg(not(test))]
             if let Some(country) = value["Country"]
                 .as_str()
                 .filter(|s| s.len() == 2 && s.bytes().all(|b| b.is_ascii_uppercase()))
@@ -608,7 +615,7 @@ impl<C: Context> Api<C> {
         if !netzone.is_empty() {
             headers.push(("X-PM-netzone", &netzone));
         }
-        let result = self
+        let mut result = self
             .call(
                 "GET",
                 "/vpn/v1/logicals?SecureCoreFilter=all&WithState=true",
@@ -616,10 +623,10 @@ impl<C: Context> Api<C> {
                 &headers,
             )
             .await?;
-        result["LogicalServers"]
-            .as_array()
-            .cloned()
-            .ok_or_else(|| failure("Server catalog unavailable"))
+        match result.get_mut("LogicalServers").map(Value::take) {
+            Some(Value::Array(nodes)) => Ok(nodes),
+            _ => Err(failure("Server catalog unavailable")),
+        }
     }
     async fn revoke(&self, serial: &str) -> io::Result<()> {
         if serial.is_empty() || !serial.bytes().all(|b| b.is_ascii_digit()) {
@@ -720,6 +727,12 @@ fn catalog_rows(all: &[Value], o: &Options) -> io::Result<Vec<Value>> {
                     .as_f64()
                     .unwrap_or(0.)
                     .total_cmp(&b["Score"].as_f64().unwrap_or(0.))
+                    .then_with(|| {
+                        a["Load"]
+                            .as_f64()
+                            .unwrap_or(0.)
+                            .total_cmp(&b["Load"].as_f64().unwrap_or(0.))
+                    })
             })
     });
     let mut out = Vec::new();
@@ -848,6 +861,12 @@ async fn operate<C: Context>(api: &Api<C>, o: &Options, path: &Path) -> io::Resu
             .as_f64()
             .unwrap_or(0.)
             .total_cmp(&b["Score"].as_f64().unwrap_or(0.))
+            .then_with(|| {
+                a["Load"]
+                    .as_f64()
+                    .unwrap_or(0.)
+                    .total_cmp(&b["Load"].as_f64().unwrap_or(0.))
+            })
     });
     let server = choices
         .first()
@@ -950,6 +969,9 @@ pub fn main(args: &[String], revoke_alias: bool) -> io::Result<()> {
             "Rust Proton account compatibility API: --username USER --list-servers --free-only --json; --server NAME --ipv6 --no-save --duration 7d --metadata-json --output FILE; --revoke-serial SERIAL; --list-configs; --renew-serial SERIAL; --logout; --forget. Existing controller flags remain supported."
         );
         return Ok(());
+    }
+    if unsafe { libc::geteuid() } != 0 {
+        return Err(failure("Run account commands as root"));
     }
     let mut o = Options::parse(args)?;
     if revoke_alias {
@@ -1125,3 +1147,7 @@ mod tests {
         assert_eq!(*s.value.lock().unwrap(), saved);
     }
 }
+
+#[cfg(test)]
+#[path = "openwrt-account-tests.rs"]
+mod integration_tests;

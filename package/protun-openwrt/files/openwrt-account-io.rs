@@ -68,7 +68,10 @@ pub(super) struct Resolver {
 impl Resolver {
     async fn query(&self, host: &str, kind: RecordType) -> io::Result<Vec<IpAddr>> {
         use hickory_proto::op::Query;
-        let name = Name::from_ascii(host).map_err(|_| failure("Invalid API hostname"))?;
+        let mut name = Name::from_ascii(host).map_err(|_| failure("Invalid API hostname"))?;
+        // A wire-decoded DNS question is absolute, including its root label.
+        // Name equality deliberately distinguishes relative and absolute names.
+        name.set_fqdn(true);
         let id = rand::random::<u16>();
         let mut query = Message::new(
             id,
@@ -223,4 +226,116 @@ pub(super) fn from_environment() -> io::Result<Os> {
         dialer: dialer.clone(),
         resolver: Resolver { dns, dialer },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hickory_proto::{
+        op::{MessageType, OpCode},
+        rr::{
+            Record,
+            rdata::{A, AAAA},
+        },
+    };
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    fn answer(query: &[u8]) -> Vec<u8> {
+        let query = Message::from_vec(query).unwrap();
+        let mut response = Message::new(query.metadata.id, MessageType::Response, OpCode::Query);
+        response.queries = query.queries.clone();
+        let q = &query.queries[0];
+        let data = match q.query_type {
+            RecordType::A => RData::A(A(Ipv4Addr::new(192, 0, 2, 7))),
+            RecordType::AAAA => RData::AAAA(AAAA("2001:db8::7".parse::<Ipv6Addr>().unwrap())),
+            _ => panic!("unexpected DNS type"),
+        };
+        response
+            .answers
+            .push(Record::from_rdata(q.name.clone(), 60, data));
+        response.to_vec().unwrap()
+    }
+    #[test]
+    fn relative_api_hostname_matches_wire_dns_questions() {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let addr = socket.local_addr().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let thread = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let mut buf = [0u8; 4096];
+                let (n, peer) = socket.recv_from(&mut buf).unwrap();
+                socket.send_to(&answer(&buf[..n]), peer).unwrap();
+            }
+        });
+        let resolver = Resolver {
+            dns: Some(addr),
+            dialer: Dialer::default(),
+        };
+        let ips = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(resolver.resolve("example.invalid"))
+            .unwrap();
+        thread.join().unwrap();
+        assert!(ips.contains(&"192.0.2.7".parse().unwrap()));
+        assert!(ips.contains(&"2001:db8::7".parse().unwrap()));
+    }
+    #[test]
+    fn truncated_udp_answer_retries_bootstrap_dns_over_tcp() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let udp = std::net::UdpSocket::bind(addr).unwrap();
+        udp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let thread = std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let (n, peer) = udp.recv_from(&mut buf).unwrap();
+            let mut reply = Message::from_vec(&answer(&buf[..n])).unwrap();
+            reply.metadata.truncation = true;
+            reply.answers.clear();
+            udp.send_to(&reply.to_vec().unwrap(), peer).unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((s, _)) => break s,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        assert!(std::time::Instant::now() < deadline);
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(e) => panic!("DNS TCP fixture failed: {e}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut size = [0; 2];
+            stream.read_exact(&mut size).unwrap();
+            let mut body = vec![0; u16::from_be_bytes(size) as usize];
+            stream.read_exact(&mut body).unwrap();
+            let reply = answer(&body);
+            stream
+                .write_all(&(reply.len() as u16).to_be_bytes())
+                .unwrap();
+            stream.write_all(&reply).unwrap();
+        });
+        let resolver = Resolver {
+            dns: Some(addr),
+            dialer: Dialer::default(),
+        };
+        let ips = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(resolver.query("example.invalid", RecordType::A))
+            .unwrap();
+        thread.join().unwrap();
+        assert_eq!(ips, vec!["192.0.2.7".parse::<IpAddr>().unwrap()]);
+    }
+    #[test]
+    fn failure_to_mark_a_socket_is_not_silently_ignored() {
+        assert!(mark(-1, Some(0x621)).is_err());
+    }
 }
