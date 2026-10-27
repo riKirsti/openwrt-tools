@@ -1,0 +1,40 @@
+#!/bin/sh
+# This endpoint is public; no account credentials are read or sent.
+set -eu
+umask 077
+state=/root/proton-private
+run=/tmp/proton-runtime
+mkdir -p "$run"; chmod 700 "$run"
+exec 6>"$run/transport-metadata.guard"
+flock -n 6 || exit 0
+now="$(date +%s)"
+checked="$(jsonfilter -i "$state/transport-ports.json" -e '@.checked' 2>/dev/null || echo 0)"
+attempt="$(cat "$run/transport-metadata-attempt" 2>/dev/null || echo 0)"
+case "$checked:$attempt" in *[!0-9:]*) exit 1;; esac
+if [ "${1:-}" != force ]; then
+ [ "$checked" -gt "$now" ] || [ $((now-checked)) -ge 3600 ] || exit 0
+ [ "$attempt" -gt "$now" ] || [ $((now-attempt)) -ge 60 ] || exit 0
+fi
+printf '%s\n' "$now" > "$run/transport-metadata-attempt"
+tmp="$(mktemp "$run/transport-metadata.XXXXXX")"
+trap 'rm -f "$tmp" "$tmp.ports" "$tmp.json"' EXIT
+curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --tlsv1.2 \
+ --connect-timeout 4 --max-time 8 --max-filesize 1048576 \
+ -H 'x-pm-appversion: linux-vpn-gui@5.8.7+aarch64' \
+ -H 'User-Agent: ProtonVPN/5.8.7 (Linux; ubuntu/24.04)' \
+ https://vpn-api.proton.me/vpn/v2/clientconfig -o "$tmp" 6>&- || exit 1
+[ "$(jsonfilter -i "$tmp" -e '@.Code')" = 1000 ] || exit 1
+[ "$(jsonfilter -i "$tmp" -e '@.FeatureFlags.WireGuardTls')" = true ] || exit 1
+jsonfilter -i "$tmp" -e '@.DefaultPorts.WireGuard.TLS[*]' > "$tmp.ports"
+. /usr/share/libubox/jshn.sh
+json_init; json_add_int version 1; json_add_int checked "$now"; json_add_array tls_ports
+count=0
+while IFS= read -r port; do
+ case "$port" in ''|*[!0-9]*) exit 1;; esac
+ [ "${#port}" -le 5 ] && [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || exit 1
+ count=$((count+1)); [ "$count" -le 16 ] || exit 1
+ json_add_int '' "$port"
+done < "$tmp.ports"
+[ "$count" -gt 0 ] || exit 1
+json_close_array; json_dump > "$tmp.json"
+chmod 600 "$tmp.json"; mv "$tmp.json" "$state/transport-ports.json"
