@@ -7,8 +7,7 @@ The APK installs one executable plus the OpenWrt service and configuration. It
 does not install `libprotun.so` or require the separate `local-agent-rs` APK.
 
 The service is disabled by default. No installation script rewrites network,
-DNS, firewall, PBR, or ZeroTier settings. The existing travel/home ZeroTier
-connection retains its role and configuration.
+DNS, firewall, PBR, or ZeroTier settings. Existing ZeroTier connections retain their role and configuration.
 
 ## Protocol selection
 
@@ -181,7 +180,7 @@ logread -e protun
 Supervision uses delayed, bounded respawns. Uplink changes restart the process;
 update the JSON if the physical device name changes. Rollback means stopping
 and disabling this service and restoring the prior Proton/WireGuard interface,
-without modifying ZeroTier or the home router.
+without modifying ZeroTier or the remote router.
 
 ## Verification and limits
 

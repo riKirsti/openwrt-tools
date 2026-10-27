@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+umask 077
+. /usr/lib/exit-node-common
+case "${1:-}" in
+ prepare)
+  if [ "$VPN_BACKEND" = stealth ]; then
+   /usr/libexec/proton-wireguard stop
+   exec /usr/libexec/proton-stealth "$@"
+  fi
+  /usr/libexec/proton-stealth stop
+  exec /usr/libexec/proton-wireguard "$@";;
+ test|health)
+  if [ "$VPN_BACKEND" = stealth ]; then exec /usr/libexec/proton-stealth "$@"; fi
+  [ "$1" != health ] || exit 0
+  exec /usr/libexec/proton-wireguard "$@";;
+ stop)
+  /usr/libexec/proton-stealth stop
+  exec /usr/libexec/proton-wireguard stop;;
+ *) exit 2;;
+esac

@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - main
+      - proton-stealth-integration
     paths:
       - '.github/workflows/build.yml'
       - '.github/scripts/build-sdk.sh'
@@ -25,6 +26,8 @@ concurrency:
 
 jobs:
   build:
+    # The integration branch already has a push build; avoid an identical second build.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'proton-stealth-integration' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -135,16 +138,17 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Checkout the built commit for publishing
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/proton-stealth-integration') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: true
 
       - name: Commit APKs to build folder
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/proton-stealth-integration') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
         env:
           APK_DIR: ${{ runner.temp }}/tools-apk
+          PUBLISH_BRANCH: ${{ github.ref_name }}
         run: |
           bash .github/scripts/publish-apks.sh

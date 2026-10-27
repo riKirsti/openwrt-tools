@@ -103,6 +103,7 @@ pub struct Agent {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub tun_name: String,
+    pub tun_mtu: Option<u16>,
     pub uplink_device: String,
     #[serde(default)]
     pub protocol: ProtocolChoice,
@@ -126,6 +127,8 @@ pub struct Config {
     pub connect_timeout_seconds: u64,
     pub socket_mark: Option<u32>,
     pub local_agent: Option<Agent>,
+    pub status_file: Option<String>,
+    pub status_instance: Option<String>,
 }
 
 impl Config {
@@ -145,6 +148,14 @@ impl Config {
     }
 
     pub fn validate(&self) -> io::Result<()> {
+        if self.tun_mtu.is_some_and(|mtu| !(1280..=9000).contains(&mtu)) {
+            return Err(failure("TUN MTU must be between 1280 and 9000"));
+        }
+        if self.status_file.is_some() != self.status_instance.is_some()
+            || self.status_file.as_ref().is_some_and(|p| !Path::new(p).is_absolute())
+            || self.status_instance.as_ref().is_some_and(|s| s.is_empty() || s.len()>64 || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))) {
+            return Err(failure("Status file and valid instance must be configured together"));
+        }
         if !interface_name(&self.tun_name)
             || !interface_name(&self.uplink_device)
             || self.tun_name == self.uplink_device
@@ -381,6 +392,19 @@ mod tests {
         let mut c = fixture();
         c.protocol = ProtocolChoice::WireguardUdp;
         c.udp_ports.clear();
+        assert!(c.validate().is_err());
+    }
+    #[test]
+    fn invalid_ipv6_mtu_and_partial_status_configuration_are_rejected() {
+        let mut c = fixture();
+        c.tun_mtu = Some(1279);
+        assert!(c.validate().is_err());
+        c.tun_mtu = Some(1280);
+        c.status_file = Some("/tmp/private-state/current.json".into());
+        assert!(c.validate().is_err());
+        c.status_instance = Some("test-instance".into());
+        c.validate().unwrap();
+        c.status_instance = Some("invalid/instance".into());
         assert!(c.validate().is_err());
     }
     #[test]

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs::OpenOptions;
 use std::io::{self, Read};
-use std::os::fd::{AsRawFd, IntoRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 use std::sync::{
@@ -24,6 +24,8 @@ mod auth;
 mod cache;
 #[path = "openwrt-config.rs"]
 mod config;
+#[path = "openwrt-status.rs"]
+mod status;
 use cache::{DiskCache, Selector};
 use config::Config;
 
@@ -103,7 +105,7 @@ fn device_index(device: &CString) -> u32 {
     unsafe { libc::if_nametoindex(device.as_ptr()) }
 }
 
-fn create_tun(name: &str) -> io::Result<OwnedFd> {
+fn create_tun(name: &str, mtu: Option<u16>) -> io::Result<OwnedFd> {
     let name_c = CString::new(name).map_err(|_| failure("Invalid TUN name"))?;
     if device_index(&name_c) != 0 {
         return Err(failure(
@@ -126,8 +128,18 @@ fn create_tun(name: &str) -> io::Result<OwnedFd> {
     if unsafe { libc::ioctl(fd.as_raw_fd(), libc::TUNSETIFF, &request) } < 0 {
         return Err(io::Error::last_os_error());
     }
-    // The descriptor is not persistent: shutdown removes only this new device.
-    // netifd configures its addresses, link state and MTU when it appears.
+    if let Some(mtu) = mtu {
+        let control = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
+        if control < 0 { return Err(io::Error::last_os_error()); }
+        let control = unsafe { OwnedFd::from_raw_fd(control) };
+        request.ifr_ifru.ifru_mtu = i32::from(mtu);
+        // Infer the target libc request type; musl's ioctl uses int.
+        if unsafe { libc::ioctl(control.as_raw_fd(), libc::SIOCSIFMTU as _, &request) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    // Closing the descriptor removes this device. netifd owns addresses/link;
+    // optional MTU is applied here because dynamic interface MTU is not a device setting.
     Ok(fd)
 }
 
@@ -173,10 +185,11 @@ fn run(config: Config, private_key: Option<WgClientPrivateKey>, probe: bool) -> 
     if device_index(&uplink) == 0 {
         return Err(failure("Configured physical uplink does not exist"));
     }
+    let mut status = status::Status::open(config.status_file.as_deref(), config.status_instance.as_deref(), probe)?;
     let tun = if probe {
         None
     } else {
-        Some(create_tun(&config.tun_name)?)
+        Some(create_tun(&config.tun_name, config.tun_mtu)?)
     };
     // Coalesce wakeups while retaining the latest state, including disconnects.
     // Callbacks never block on a full queue or build an unbounded backlog.
@@ -230,6 +243,7 @@ fn run(config: Config, private_key: Option<WgClientPrivateKey>, probe: bool) -> 
     let deadline = Instant::now() + Duration::from_secs(config.connect_timeout_seconds);
     let mut connected_once = false;
     let result = loop {
+        if let Err(error) = status.heartbeat() { break Err(error); }
         if disk_cache.as_ref().is_some_and(DiskCache::failed) {
             break Err(failure(
                 "Cannot safely read or persist Proton session cache",
@@ -278,6 +292,12 @@ fn run(config: Config, private_key: Option<WgClientPrivateKey>, probe: bool) -> 
                 let Some(state) = latest_state.lock().unwrap().take() else {
                     continue;
                 };
+                if let ConnectionState::Connected { peer, .. } = &state.connection_state {
+                    if !config.protocol.allows(peer.protocol) {
+                        break Err(failure("Connected protocol does not match the configured selection"));
+                    }
+                }
+                if let Err(error) = status.update(&state) { break Err(error); }
                 if matches!(
                     state.interface_state,
                     InterfaceState::Up { error: Some(_) }
@@ -321,8 +341,9 @@ fn run(config: Config, private_key: Option<WgClientPrivateKey>, probe: bool) -> 
             }
         }
     };
+    let status_result = status.stop();
     connection.disconnect_and_wait();
-    result
+    result.and(status_result)
 }
 
 #[derive(Default)]

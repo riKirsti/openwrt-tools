@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${APK_DIR:?Missing APK directory}"
+: "${PUBLISH_BRANCH:=main}"
+case "$PUBLISH_BRANCH" in main|proton-stealth-integration) ;; *) echo 'Unexpected publishing branch' >&2; exit 1;; esac
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 shopt -s nullglob
 package_names=()
@@ -37,4 +39,4 @@ fi
 git config user.name 'github-actions[bot]'
 git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 git commit -m 'Update tools APKs in build/'
-git push origin HEAD:refs/heads/main
+git push origin "HEAD:refs/heads/$PUBLISH_BRANCH"
