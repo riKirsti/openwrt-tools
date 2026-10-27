@@ -221,7 +221,7 @@ pub fn login(config: &Config, cache: &DiskCache) -> io::Result<()> {
         .build()?;
     let result=runtime.block_on(async {
         let app=App::new(&agent.login_app_version).map_err(|_|failure("Invalid login app version"))?
-            .with_user_agent("protun-openwrt/3.0.5");
+            .with_user_agent(concat!("protun-openwrt/",env!("CARGO_PKG_VERSION")));
         let jar=Jar::default();
         let session=muon::Client::builder(app,Environment::new_prod())
             .with_operating_system(Os { clock:Clock::default(), dialer:Dialer {

@@ -305,7 +305,7 @@ impl Config {
     ) -> io::Result<InitialConnectionConfig> {
         let connection_mode = if let Some(agent) = &self.local_agent {
             ConnectionMode::LocalAgent {
-                user_agent: "protun-openwrt/3.0.5".into(),
+                user_agent: concat!("protun-openwrt/", env!("CARGO_PKG_VERSION")).into(),
                 app_version: agent.app_version.clone(),
                 settings: agent.settings.upstream()?,
                 muon_env: MuonEnv::Prod,

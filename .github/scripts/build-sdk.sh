@@ -213,7 +213,7 @@ verify_client() {
     local -a clients
     mapfile -t clients < <(find build_dir -type f -path '*/ipkg-*/protun-openwrt/usr/sbin/protun-openwrt')
     if (( ${#clients[@]} != 1 )); then
-        echo 'Expected one staged Stealth client' >&2
+        echo 'Expected one staged protocol client' >&2
         exit 1
     fi
     local client fixture key needed dependency

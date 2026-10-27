@@ -80,7 +80,7 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build and verify libraries and the Stealth client with the OpenWrt SDK
+      - name: Build and verify libraries and the protocol client with the OpenWrt SDK
         id: build
         shell: bash
         env:
