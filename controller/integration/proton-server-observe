@@ -1,0 +1,49 @@
+#!/bin/sh
+# Observations are advisory. A recorder failure never changes routing or protection.
+set -e
+umask 077
+. /usr/lib/exit-node-common
+state=/root/proton-private
+[ "$VPN_BACKEND" = stealth ] || exit 0
+event="${1:-}"
+case "$event" in
+ health)
+  # Network checks must not hold the transaction mutex. Verify the same engine
+  # instance again after acquiring it, before associating a result with a server.
+  instance="$(jsonfilter -i "$PROTON_RUNTIME/stealth.json" -e '@.status_instance' 2>/dev/null || true)"
+  /usr/libexec/proton-tunnel health || exit 0
+  exec 9>/tmp/exitnode-switch.guard
+  try_lock 9 || exit 0
+  [ -n "$instance" ] && [ "$instance" = "$(jsonfilter -i "$PROTON_RUNTIME/stealth.json" -e '@.status_instance')" ] || exit 0
+  [ "$(jsonfilter -i /tmp/exitnode-runtime.json -e '@.backend')" = stealth ] || exit 0
+  [ "$(jsonfilter -i /tmp/exitnode-runtime.json -e '@.wireguard')" = true ] || exit 0
+  network="$(jsonfilter -i /tmp/exitnode-runtime.json -e '@.network_id')"
+  server="$(jsonfilter -i /tmp/exitnode-runtime.json -e '@.server')"
+  file="$state/active.conf"; event=success
+  ;;
+ success|failure)
+  # These calls inherit descriptor 9 from the transaction controller.
+  [ "$#" -eq 4 ] || exit 2
+  network="$2"; server="$3"; file="$4"
+  case "$file" in "$state/active.conf"|"$state/pending.conf") ;; *) exit 2;; esac
+  ;;
+ *) exit 2;;
+esac
+[ "$network" = "$(jsonfilter -i "$PROTON_RUNTIME/node-state.json" -e '@.network_id')" ] || exit 0
+ip="$(sed -n 's/^Endpoint[[:space:]]*=[[:space:]]*//p' "$file")"; ip="${ip%:*}"
+key="$(sed -n 's/^PublicKey[[:space:]]*=[[:space:]]*//p' "$file")"
+[ "$ip" = "$(jsonfilter -i "$PROTON_RUNTIME/stealth.json" -e '@.server_ip')" ] || exit 0
+[ "$key" = "$(jsonfilter -i "$PROTON_RUNTIME/stealth.json" -e '@.server_public_key')" ] || exit 0
+port=0
+if [ "$event" = success ]; then
+ vpn_ready || exit 0
+ port="$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.port')"
+else
+ # A local host interface/addressing fault does not establish a server failure.
+ ip -o link show dev "$VPN_DEV" | grep -Eq '<([^>]*,)?UP(,|>)' || exit 0
+ ip -o address show dev "$VPN_DEV" | grep -q '10.2.0.2/32' || exit 0
+ ip -6 -o address show dev "$VPN_DEV" | grep -q '2a07:b944::2:2/128' || exit 0
+ ip -4 route show table 620 | grep -q "^default dev $VPN_DEV" || exit 0
+ ip -6 route show table 620 | grep -q "^default dev $VPN_DEV" || exit 0
+fi
+/usr/libexec/proton-node-state observe "$event" "$network" stealth "$server" "$ip" "$key" "$port"
