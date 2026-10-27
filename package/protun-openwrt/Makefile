@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=protun-openwrt
 PKG_VERSION:=3.0.5
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 
 PKG_SOURCE:=protun-$(PKG_VERSION).tar.gz
 PKG_BUILD_DIR:=$(BUILD_DIR)/protun-$(PKG_VERSION)
@@ -14,14 +14,14 @@ PKG_HASH:=a95a3cce00cfb48f604c65fc21f985b751c4b04a19beb03917f61bb0379d70ee
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 
-TOOLS_TITLE:=Proton VPN Stealth client
+TOOLS_TITLE:=Proton VPN protocol client
 TOOLS_URL:=https://github.com/ProtonVPN/protun
-TOOLS_DESCRIPTION:=Experimental OpenWrt Stealth client using the Proton VPN core.
+TOOLS_DESCRIPTION:=OpenWrt Proton VPN client with UDP, TCP, Stealth and Local Agent support.
 TOOLS_CRATE:=protun
 TOOLS_DEPENDS:=+kmod-tun +jsonfilter
 
 define TOOLS_EXTRA_PREPARE
-	$(CP) ./files/openwrt-client.rs $(PKG_BUILD_DIR)/openwrt-client.rs
+	$(CP) ./files/openwrt-*.rs $(PKG_BUILD_DIR)/
 endef
 
 define TOOLS_EXTRA_COMPILE
@@ -30,6 +30,11 @@ define TOOLS_EXTRA_COMPILE
 			--features openwrt-client \
 			--profile $(CARGO_PKG_PROFILE) --target-dir $(TOOLS_CARGO_TARGET_DIR) \
 			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1)
+	+cd $(PKG_BUILD_DIR) && $(TOOLS_CARGO_ENV) \
+		$(TOOLS_CARGO) test --locked --no-run --bin protun-openwrt \
+			--features openwrt-client --profile $(CARGO_PKG_PROFILE) \
+			--target-dir $(TOOLS_CARGO_TARGET_DIR) --message-format=json \
+			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1) > $(PKG_BUILD_DIR)/openwrt-tests.jsonl
 endef
 
 define TOOLS_EXTRA_INSTALL
@@ -37,7 +42,7 @@ define TOOLS_EXTRA_INSTALL
 	$(INSTALL_BIN) $(TOOLS_CARGO_TARGET_DIR)/$(RUSTC_TARGET_ARCH)/$(CARGO_OUTPUT_DIR)/protun-openwrt $(1)/usr/sbin/
 	$(INSTALL_BIN) ./files/protun.init $(1)/etc/init.d/protun
 	$(INSTALL_CONF) ./files/protun.config $(1)/etc/config/protun
-	$(INSTALL_DATA) ./files/client.json.example $(1)/etc/protun/client.json.example
+	$(INSTALL_DATA) ./files/*.json.example $(1)/etc/protun/
 endef
 
 include $(TOOLS_PACKAGE_DIR)../rust-library.mk

@@ -1,6 +1,6 @@
 # OpenWrt tools
 
-Build a Stealth client and two Rust library APKs for an ARM64 Cortex-A53 router:
+Build a Proton VPN client and two Rust library APKs for an ARM64 Cortex-A53 router:
 
 | Package | Installed program or library |
 | --- | --- |
@@ -9,7 +9,9 @@ Build a Stealth client and two Rust library APKs for an ARM64 Cortex-A53 router:
 | `local-agent-rs` | `/usr/lib/liblocal_agent_rs.so` |
 
 Applications use these libraries through their upstream interfaces. The `protun-openwrt`
-APK includes the experimental Stealth client and a disabled OpenWrt service.
+APK includes a client supporting WireGuard UDP, WireGuard TCP, Stealth, automatic
+protocol selection, and integrated Local Agent/account-session interfaces.
+Stealth remains the default. The OpenWrt service is disabled until configured.
 See [Stealth setup and verification](docs/stealth.md). Installing the package
 does not migrate a WireGuard interface or change ZeroTier, routing, DNS or firewall
 configuration. The other two APKs contain libraries, not runnable VPN services.

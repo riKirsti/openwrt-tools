@@ -1,6 +1,7 @@
 {
   "tun_name": "protun0",
   "uplink_device": "REPLACE_WITH_PHYSICAL_WAN_DEVICE",
+  "protocol": "stealth",
   "server_ip": "192.0.2.1",
   "server_public_key": "REPLACE_WITH_PROTON_SERVER_PUBLIC_KEY",
   "private_key_file": "/etc/protun/private.key",

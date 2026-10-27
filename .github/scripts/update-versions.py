@@ -133,7 +133,8 @@ def updated_source(root, name, tag, cargo, rust_version):
             subprocess.run(["git", "apply", "--check", str(patch)], cwd=source, check=True)
             subprocess.run(["git", "apply", str(patch)], cwd=source, check=True)
         if name == "protun-openwrt":
-            shutil.copyfile(root / "package/protun-openwrt/files/openwrt-client.rs", source / "openwrt-client.rs")
+            for client_source in (root / "package/protun-openwrt/files").glob("openwrt-*.rs"):
+                shutil.copyfile(client_source, source / client_source.name)
         build_source = (source / project["manifest"]).parent
         shutil.copyfile(root / "package" / name / "files/Cargo.lock", build_source / "Cargo.lock")
         # Retain existing dependencies wherever the new manifest permits them.

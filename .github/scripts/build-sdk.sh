@@ -242,7 +242,20 @@ verify_client() {
     chmod 600 "$fixture/client.json"
     local -a run_client=("$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" "$client")
     "${run_client[@]}" --help
+    "${run_client[@]}" --capabilities
     "${run_client[@]}" --check-config "$fixture/client.json"
+    local mode expected summary test_binary
+    for mode in stealth wireguard-udp wireguard-tcp auto; do
+        sed "s/}$/,\"protocol\":\"$mode\",\"udp_ports\":[51820],\"tcp_ports\":[443]}/" "$fixture/client.json" > "$fixture/mode.json"
+        summary="$("${run_client[@]}" --check-config "$fixture/mode.json")"
+        case "$mode" in
+            stealth) expected='protocol=Stealth peers=1 udp=0 tcp=0 tls=1' ;;
+            wireguard-udp) expected='protocol=WireguardUdp peers=1 udp=1 tcp=0 tls=0' ;;
+            wireguard-tcp) expected='protocol=WireguardTcp peers=1 udp=0 tcp=1 tls=0' ;;
+            auto) expected='protocol=Auto peers=1 udp=1 tcp=1 tls=1' ;;
+        esac
+        grep -Fq "$expected" <<< "$summary"
+    done
     sed 's/}$/,"unsupported":true}/' "$fixture/client.json" > "$fixture/unknown.json"
     if "${run_client[@]}" --check-config "$fixture/unknown.json"; then
         echo 'Client accepted an unknown configuration field' >&2
@@ -265,8 +278,24 @@ verify_client() {
         echo 'Client accepted an invalid private key' >&2
         exit 1
     fi
-    rm -- "$fixture/client.json" "$fixture/private.key" "$fixture/unknown.json" "$fixture/symlink.json" "$fixture/linked.key"
+    rm -- "$fixture/client.json" "$fixture/private.key" "$fixture/unknown.json" "$fixture/symlink.json" "$fixture/linked.key" "$fixture/mode.json"
     rmdir -- "$fixture"
+    test_binary="$(python3 - <<'PY'
+import json
+from pathlib import Path
+records = list(Path('build_dir').rglob('openwrt-tests.jsonl'))
+if len(records) != 1:
+    raise SystemExit('Expected one client unit-test manifest')
+tests = [r['executable'] for line in records[0].read_text().splitlines()
+         if (r := json.loads(line)).get('reason') == 'compiler-artifact'
+         and r.get('profile', {}).get('test') and r.get('executable')
+         and r.get('target', {}).get('name') == 'protun-openwrt']
+if len(tests) != 1:
+    raise SystemExit('Expected one client unit-test executable')
+print(tests[0])
+PY
+    )"
+    "$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" "$test_binary"
     echo 'ARM64 client starts and accepts/rejects configuration as expected; no network session tested'
 }
 
@@ -275,5 +304,5 @@ run_phase 'Preflight' preflight
 run_phase 'SDK feeds and configuration' configure_sdk
 run_phase 'Compile and package' compile_packages
 run_phase 'ARM64 library checks' verify_libraries
-run_phase 'ARM64 Stealth client checks' verify_client
+run_phase 'ARM64 protocol client checks' verify_client
 run_phase 'Export APKs' export_apks

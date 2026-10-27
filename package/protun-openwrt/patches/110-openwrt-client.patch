@@ -21,5 +21,5 @@ an unused static archive and another shared library.
  
 @@ -71,2 +76,3 @@
  [features]
-+openwrt-client = ["linux", "dep:base64", "dep:serde", "dep:serde_json"]
++openwrt-client = ["linux", "local-agent", "dep:base64", "dep:serde", "dep:serde_json", "dep:tokio", "dep:async-compat", "dep:futures", "muon/login"]
  bindgen-cli = ["uniffi", "uniffi/cli"]
