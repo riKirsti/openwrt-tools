@@ -28,7 +28,7 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
-struct Clock(Instant);
+pub(super) struct Clock(Instant);
 impl Default for Clock {
     fn default() -> Self {
         Self(Instant::now())
@@ -116,7 +116,7 @@ impl OperatingSystem for Os {
     }
 }
 #[derive(Clone, Debug)]
-struct Executor;
+pub(super) struct Executor;
 impl muon::rt::Spawn for Executor {
     fn spawn_obj(
         &self,
@@ -158,7 +158,7 @@ impl Drop for Terminal {
         unsafe { libc::tcsetattr(self.file.as_raw_fd(), libc::TCSANOW, &self.original) };
     }
 }
-fn prompt(label: &str, secret: bool) -> io::Result<String> {
+pub(super) fn prompt(label: &str, secret: bool) -> io::Result<String> {
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -200,7 +200,7 @@ fn prompt(label: &str, secret: bool) -> io::Result<String> {
     }
     String::from_utf8(bytes).map_err(|_| failure("Login input must be UTF-8"))
 }
-fn erase(value: &mut String) {
+pub(super) fn erase(value: &mut String) {
     // Overwriting with zero bytes preserves UTF-8 validity. The SDK may have its
     // own copies; this only erases the command's owned prompt buffer.
     unsafe { value.as_mut_vec().fill(0) };

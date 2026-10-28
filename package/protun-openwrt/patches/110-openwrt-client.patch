@@ -1,12 +1,8 @@
-Subject: Add an opt-in OpenWrt client binary using the public Protun API
-
-The package's explicit cargo rustc command still builds the installed cdylib.
-Use only rlib as Cargo's default so building the client does not also produce
-an unused static archive and another shared library.
+Subject: Add an opt-in OpenWrt client and account API compatibility entry points
 
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -1,2 +1,7 @@
+@@ -1,10 +1,15 @@
 +[[bin]]
 +name = "protun-openwrt"
 +path = "openwrt-client.rs"
@@ -14,12 +10,29 @@ an unused static archive and another shared library.
 +
  [package]
  name = "protun"
-@@ -6,3 +11,3 @@
+ version = "3.0.5"
+ edition = "2024"
+ 
  [lib]
 -crate-type = ["cdylib", "staticlib", "rlib"]
 +crate-type = ["rlib"]
  
-@@ -71,2 +76,3 @@
+ [profile.release]
+ panic = "abort"
+@@ -13,6 +18,8 @@
+ panic = "abort"
+ 
+ [dependencies]
++hickory-proto = { version = "=0.26.3", default-features = false, features = ["std"], optional = true }
++time = { version = "=0.3.55", features = ["formatting", "parsing"], optional = true }
+ base64 = { version = "0.22", default-features = false, features = ["alloc"], optional = true }
+ itertools = "0.15.0"
+ libc = { version = "0.2.189", optional = true }
+@@ -69,6 +76,7 @@
+ protun = { path = ".", features = ["test_utils"] }
+ 
  [features]
-+openwrt-client = ["linux", "local-agent", "dep:base64", "dep:serde", "dep:serde_json", "dep:tokio", "dep:async-compat", "dep:futures", "muon/login"]
++openwrt-client = ["linux", "local-agent", "dep:base64", "dep:serde", "dep:serde_json", "dep:tokio", "dep:async-compat", "dep:futures", "muon/login", "dep:hickory-proto", "dep:time"]
  bindgen-cli = ["uniffi", "uniffi/cli"]
+ default = ["unix", "local-agent"]
+ unix = ["dep:libc", "dep:socket2", "mio", "uniffi"]

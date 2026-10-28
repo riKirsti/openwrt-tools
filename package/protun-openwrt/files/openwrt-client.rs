@@ -18,6 +18,8 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+#[path = "openwrt-account.rs"]
+mod account;
 #[path = "openwrt-auth.rs"]
 mod auth;
 #[path = "openwrt-cache.rs"]
@@ -379,6 +381,12 @@ fn install_signals() -> io::Result<()> {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let name=std::path::Path::new(&args[0]).file_name().and_then(|n|n.to_str()).unwrap_or("");
+    if name=="protonvpn-wg-confgen" || name=="proton-session-revoke" || args.get(1).map(String::as_str)==Some("--account") {
+        let skip=if args.get(1).map(String::as_str)==Some("--account"){2}else{1};
+        if let Err(e)=account::main(&args[skip..],name=="proton-session-revoke"){eprintln!("{e}");std::process::exit(1)}
+        return;
+    }
     if args.len() == 2 && args[1] == "--help" {
         println!(
             "protun-openwrt --check-config|--probe|--config /absolute/path/client.json\nProtocols: stealth (default), wireguard-udp, wireguard-tcp, auto.\nAccount commands: --login CONFIG, --import-session CONFIG FORK_JSON, --clear-session CONFIG.\n--capabilities lists supported interfaces. OpenWrt retains network policy. --probe creates no TUN device."
