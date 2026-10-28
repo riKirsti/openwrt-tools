@@ -381,10 +381,8 @@ fn install_signals() -> io::Result<()> {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let name=std::path::Path::new(&args[0]).file_name().and_then(|n|n.to_str()).unwrap_or("");
-    if name=="protonvpn-wg-confgen" || name=="proton-session-revoke" || args.get(1).map(String::as_str)==Some("--account") {
-        let skip=if args.get(1).map(String::as_str)==Some("--account"){2}else{1};
-        if let Err(e)=account::main(&args[skip..],name=="proton-session-revoke"){eprintln!("{e}");std::process::exit(1)}
+    if args.get(1).map(String::as_str)==Some("--account") {
+        if let Err(e)=account::main(&args[2..],false){eprintln!("{e}");std::process::exit(1)}
         return;
     }
     if args.len() == 2 && args[1] == "--help" {
