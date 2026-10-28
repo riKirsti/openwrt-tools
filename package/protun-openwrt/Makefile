@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=protun-openwrt
 PKG_VERSION:=3.0.5
-PKG_RELEASE:=11
+PKG_RELEASE:=12
 
 PKG_SOURCE:=protun-$(PKG_VERSION).tar.gz
 PKG_BUILD_DIR:=$(BUILD_DIR)/protun-$(PKG_VERSION)
@@ -41,8 +41,6 @@ define TOOLS_EXTRA_INSTALL
 	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/init.d $(1)/etc/config $(1)/etc/protun
 	$(INSTALL_BIN) $(TOOLS_CARGO_TARGET_DIR)/$(RUSTC_TARGET_ARCH)/$(CARGO_OUTPUT_DIR)/protun-openwrt $(1)/usr/sbin/
 	$(INSTALL_DIR) $(1)/usr/libexec
-	$(LN) ../sbin/protun-openwrt $(1)/usr/libexec/protonvpn-wg-confgen
-	$(LN) protonvpn-wg-confgen $(1)/usr/libexec/proton-session-revoke
 	$(INSTALL_BIN) ./files/protun.init $(1)/etc/init.d/protun
 	$(INSTALL_CONF) ./files/protun.config $(1)/etc/config/protun
 	$(INSTALL_DATA) ./files/*.json.example $(1)/etc/protun/

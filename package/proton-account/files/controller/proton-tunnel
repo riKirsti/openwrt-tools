@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+umask 077
+. /usr/lib/exit-node-common
+case "${1:-}" in
+ prepare|test|stop) exec /usr/libexec/proton-wireguard "$@";;
+ health) exit 0;;
+ *) exit 2;;
+esac
