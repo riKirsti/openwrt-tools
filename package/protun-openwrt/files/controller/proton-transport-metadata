@@ -11,7 +11,8 @@ now="$(date +%s)"
 checked="$(jsonfilter -i "$state/transport-ports.json" -e '@.checked' 2>/dev/null || echo 0)"
 attempt="$(cat "$run/transport-metadata-attempt" 2>/dev/null || echo 0)"
 case "$checked:$attempt" in *[!0-9:]*) exit 1;; esac
-if [ "${1:-}" != force ]; then
+schema="$(jsonfilter -i "$state/transport-ports.json" -e '@.version' 2>/dev/null || echo 0)"
+if [ "${1:-}" != force ] && [ "$schema" = 2 ]; then
  [ "$checked" -gt "$now" ] || [ $((now-checked)) -ge 3600 ] || exit 0
  [ "$attempt" -gt "$now" ] || [ $((now-attempt)) -ge 60 ] || exit 0
 fi
@@ -25,16 +26,21 @@ curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --tlsv
  https://vpn-api.proton.me/vpn/v2/clientconfig -o "$tmp" 6>&- || exit 1
 [ "$(jsonfilter -i "$tmp" -e '@.Code')" = 1000 ] || exit 1
 [ "$(jsonfilter -i "$tmp" -e '@.FeatureFlags.WireGuardTls')" = true ] || exit 1
-jsonfilter -i "$tmp" -e '@.DefaultPorts.WireGuard.TLS[*]' > "$tmp.ports"
 . /usr/share/libubox/jshn.sh
-json_init; json_add_int version 1; json_add_int checked "$now"; json_add_array tls_ports
-count=0
-while IFS= read -r port; do
- case "$port" in ''|*[!0-9]*) exit 1;; esac
- [ "${#port}" -le 5 ] && [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || exit 1
- count=$((count+1)); [ "$count" -le 16 ] || exit 1
- json_add_int '' "$port"
-done < "$tmp.ports"
-[ "$count" -gt 0 ] || exit 1
-json_close_array; json_dump > "$tmp.json"
+json_init; json_add_int version 2; json_add_int checked "$now"
+for transport in UDP TCP TLS; do
+ case "$transport" in UDP) field=udp_ports;; TCP) field=tcp_ports;; TLS) field=tls_ports;; esac
+ jsonfilter -i "$tmp" -e "@.DefaultPorts.WireGuard.$transport[*]" > "$tmp.ports"
+ json_add_array "$field"
+ count=0
+ while IFS= read -r port; do
+  case "$port" in ''|*[!0-9]*) exit 1;; esac
+  [ "${#port}" -le 5 ] && [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || exit 1
+  count=$((count+1)); [ "$count" -le 16 ] || exit 1
+  json_add_int '' "$port"
+ done < "$tmp.ports"
+ [ "$count" -gt 0 ] || exit 1
+ json_close_array
+done
+json_dump > "$tmp.json"
 chmod 600 "$tmp.json"; mv "$tmp.json" "$state/transport-ports.json"

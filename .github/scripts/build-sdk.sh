@@ -307,7 +307,7 @@ verify_integration() {
         echo 'Expected one staged protocol client package' >&2; exit 1
     fi
     root=${roots[0]}
-    for script in usr/lib/exitnode/backend.sh usr/libexec/proton-tunnel usr/libexec/proton-stealth usr/libexec/proton-transport-metadata etc/init.d/proton-stealth; do
+    for script in usr/lib/exitnode/backend.sh usr/libexec/proton-tunnel usr/libexec/proton-stealth usr/libexec/proton-transport-metadata etc/init.d/proton-stealth etc/init.d/proton-client; do
         test -s "$root/$script"
         bash -n "$root/$script"
     done

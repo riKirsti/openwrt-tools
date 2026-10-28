@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=protun-openwrt
 PKG_VERSION:=3.0.5
-PKG_RELEASE:=11
+PKG_RELEASE:=12
 
 PKG_SOURCE:=protun-$(PKG_VERSION).tar.gz
 PKG_BUILD_DIR:=$(BUILD_DIR)/protun-$(PKG_VERSION)
@@ -49,6 +49,7 @@ define TOOLS_EXTRA_INSTALL
 	$(INSTALL_DIR) $(1)/usr/lib/exitnode $(1)/usr/libexec
 	$(INSTALL_DATA) ./files/controller/backend.sh $(1)/usr/lib/exitnode/
 	$(INSTALL_BIN) ./files/controller/proton-tunnel ./files/controller/proton-stealth ./files/controller/proton-transport-metadata $(1)/usr/libexec/
+	$(INSTALL_BIN) ./files/controller/proton-client.init $(1)/etc/init.d/proton-client
 	$(INSTALL_BIN) ./files/controller/proton-stealth.init $(1)/etc/init.d/proton-stealth
 endef
 
