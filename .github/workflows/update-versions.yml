@@ -51,6 +51,10 @@ jobs:
           ref: main
           token: ${{ secrets.UPSTREAM_UPDATE_TOKEN }}
 
+      - name: Test the version updater
+        if: steps.interval.outputs.due == 'true'
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
       - name: Install the pinned Rust toolchain
         if: steps.interval.outputs.due == 'true'
         id: rust

@@ -103,6 +103,9 @@ PROJECTS = {
                        "release_manifest": "python-proton-vpn-local-agent/Cargo.toml", "features": ["uniffi"]},
 }
 
+# These packages are built from this repository, without an upstream release.
+LOCAL_PACKAGES = {"proton-account"}
+
 
 def manifest_version(source, path):
     manifest = tomllib.loads((source / path).read_text(encoding="utf-8"))
@@ -178,8 +181,13 @@ def update(root, cargo="cargo"):
     root = root.resolve()
     workflow = (root / WORKFLOW).read_text(encoding="utf-8")
     recipes = {path.parent.name for path in root.glob("package/*/Makefile")}
-    if recipes != PROJECTS.keys():
-        raise ValueError("Package recipes and updater targets do not match")
+    expected = PROJECTS.keys() | LOCAL_PACKAGES
+    if recipes != expected:
+        raise ValueError(
+            "Package recipes and updater targets do not match: "
+            f"missing recipes={sorted(expected - recipes)}, "
+            f"unconfigured recipes={sorted(recipes - expected)}"
+        )
     sdk = match_one(r"^\s+SDK_ARCH: ([a-z0-9_-]+)-" + VERSION + "$", workflow)
     architecture, current_openwrt = sdk.group(1), sdk.group(2)
     rust_version = match_one(r"^\s+RUST_VERSION: " + VERSION + "$", workflow).group(1)
@@ -190,7 +198,7 @@ def update(root, cargo="cargo"):
         sdk_changed = False
     changes = {}
     summary = []
-    for name, project in PROJECTS.items():
+    for name in sorted(recipes):
         make_path = Path("package") / name / "Makefile"
         makefile = (root / make_path).read_text(encoding="utf-8")
         original = makefile
@@ -198,6 +206,12 @@ def update(root, cargo="cargo"):
             raise ValueError(f"Package name does not match its folder: {name}")
         current = match_one(r"^PKG_VERSION:=" + VERSION + "$", makefile).group(1)
         revision = int(match_one(r"^PKG_RELEASE:=(\d+)$", makefile).group(1))
+        if name in LOCAL_PACKAGES:
+            if sdk_changed:
+                makefile = re.sub(r"^PKG_RELEASE:=\d+$", f"PKG_RELEASE:={revision + 1}", makefile, flags=re.MULTILINE)
+                changes[make_path] = makefile.encode()
+            continue
+        project = PROJECTS[name]
         match_one(r"^PKG_HASH:=[0-9a-f]{64}$", makefile)
         tag = latest_tag(project["repository"])
         release = tag.removeprefix("v")

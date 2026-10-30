@@ -44,6 +44,12 @@ package's `Makefile` and `files/Cargo.lock`. Updates are committed only after so
 and dependency checks succeed. A source or compiler incompatibility stops the
 update for review.
 
+The locally maintained `proton-account` package has no upstream release to track.
+SDK updates bump its package release along with the upstream packages.
+
+Run updater regression tests with
+`python3 -m unittest discover -s .github/scripts -p 'test_*.py'`.
+
 ## Layout
 
 - `package/*/Makefile`: package sources, versions, library names, and features.
