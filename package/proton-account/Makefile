@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=proton-account
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=1
+PKG_RELEASE:=3
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 PKG_FILE_DEPENDS:=$(TOOLS_PACKAGE_DIR)Cargo.toml $(TOOLS_PACKAGE_DIR)Cargo.lock $(TOOLS_PACKAGE_DIR)src $(TOOLS_PACKAGE_DIR).cargo $(TOOLS_PACKAGE_DIR)files
@@ -13,6 +13,12 @@ TOOLS_URL:=https://github.com/riKirsti/openwrt-tools
 TOOLS_DESCRIPTION:=Rust Proton account management and WireGuard configuration client.
 TOOLS_DEPENDS:=+jsonfilter
 include $(TOOLS_PACKAGE_DIR)../rust-library.mk
+
+# Account/API operations are outside the packet path; retain all features while
+# optimizing this package for router storage. Other packages keep runtime tuning.
+ifeq ($(TOOLS_BUILD_MODE),runtime)
+TOOLS_PROFILE_VARS:=CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_OPT_LEVEL=z
+endif
 
 define Package/proton-account
   SECTION:=net
