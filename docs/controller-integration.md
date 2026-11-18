@@ -3,9 +3,9 @@
 `protun-openwrt` includes optional scripts for compatible exit-node controllers.
 There is no separate integration package. The standard client supports WireGuard
 UDP, WireGuard TCP, Stealth, and automatic selection; `protocol` selects the
-transport, with Stealth as its default. The optional controller adapter currently
-selects either the existing kernel WireGuard backend or the Stealth client backend.
-It does not yet expose client TCP/automatic selection in the controller UI.
+transport, with Stealth as its default. The optional controller adapter supports
+explicit selection of WireGuard UDP, WireGuard TCP, and Stealth with the ProtunNext
+client.
 It is independent of router brand and deployment role. It is not a standalone
 network manager: the host controller must provide `/usr/lib/exit-node-common`,
 its locking and transaction functions, the expected runtime state, and its
@@ -24,10 +24,13 @@ controller-only prerequisites to the standalone client's dependency set. Verify
 those tools before activating integration; keep HTTPS certificate checking enabled.
 
 The legacy `wireguard` preference field remains the compatible VPN on/off switch.
-The new `exitnode.main.proton_backend` chooses `wireguard` or `stealth`; the runtime
-status exposes `backend`, `protocol`, and `vpn_ready` while retaining `wg_ready` for
-the current UI. Selecting Stealth supplies TLS candidates only. There is no automatic
-fallback to UDP/plain TCP or Direct.
+Set `exitnode.main.proton_backend=protun` to use the client for all three transports.
+A controller dedicated to ProtunNext may set `PROTON_CONTROLLER_BACKEND=protun` before
+sourcing the adapter. Both methods read the same `exitnode.main.proton_protocol`
+preference. It accepts `stealth` (default), `wireguard-udp`, and `wireguard-tcp`.
+The runtime status reports the negotiated protocol. The adapter supplies only the
+selected transport and preserves the controller's fail-closed policy. The existing
+`wireguard` and `stealth` backends remain available for compatible deployments.
 
 The adapter retains the existing controller's locks, transaction/credential ownership,
 tables 600/610/620, physical transport mark 0x621, DNS selection and ZeroTier binding.
@@ -53,15 +56,15 @@ Transport ports come from Proton's public `/vpn/v2/clientconfig` endpoint, using
 same working API app-version identifier as the existing account helper. No account
 credentials are read/sent for this request. HTTPS certificate verification remains
 enabled. Last validated port metadata is retained when the endpoint is unavailable;
-the actual Stealth handshake must still authenticate the configured peer. Local Agent
-account migration is not part of this change: the example custom app-version value
-was rejected by the live API during review.
+the actual handshake must still authenticate the configured peer. The package's
+`protun-openwrt --account` commands let controllers reuse the same account client
+for server discovery and credential operations.
 
 Before activation, take private backups and validate the source hashes, shell syntax,
-all generated policies, and the binary on the actual device. Keep the backend set to
-WireGuard while deploying the compatible controller changes. Then use the controller's
-`backend stealth` command in Direct and test all five modes. `backend wireguard` is
-the deliberate rollback path, subject to the controller's normal transaction checks.
+all generated policies, and the binary on the actual device. Start from Direct,
+then validate each protocol through the controller, including credential refresh
+and restoration after a failed transition. For an existing controller migration,
+keep its last working package and configuration available for rollback.
 
 Official references reviewed:
 

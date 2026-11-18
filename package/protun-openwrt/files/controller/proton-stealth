@@ -5,9 +5,7 @@ umask 077
 . /usr/lib/exit-node-common
 state=/root/proton-private
 dev=pt-proton
-VPN_BACKEND=stealth
-VPN_DEV="$dev"
-VPN_PROTOCOL=stealth
+case "$VPN_BACKEND" in protun|stealth) ;; *) [ "${1:-}" = stop ] || exit 2;; esac
 stop_tunnel() {
  rm -f "$PROTON_RUNTIME/stealth-wanted"
  /etc/init.d/proton-stealth stop 9>&- >/dev/null 2>&1 || true
@@ -29,7 +27,7 @@ add_tun_interface() {
 }
 restore_tun_interface() {
  local iface attempt
- [ "$(uci -q get exitnode.main.proton_backend || echo wireguard)" = stealth ] || return 1
+ [ "$VPN_BACKEND" != wireguard ] || return 1
  [ -f "$PROTON_RUNTIME/stealth-wanted" ] || return 1
  # netifd removes dynamic logical interfaces when their TUN device disappears.
  # A supervised client can reconnect before host addressing has been restored.
@@ -52,8 +50,6 @@ case "${1:-}" in
   file="${2:-$state/active.conf}"
   case "$file" in "$state/active.conf"|"$state/pending.conf") ;; *) exit 2;; esac
   stop_tunnel
-  /usr/libexec/proton-transport-metadata >/dev/null 2>&1 || true
-  [ -s "$state/transport-ports.json" ] || { echo 'Verified Stealth transport metadata is unavailable' >&2; exit 1; }
   uplink="$(uplink_device)" || exit 1
   endpoint="$(sed -n 's/^Endpoint[[:space:]]*=[[:space:]]*//p' "$file")"
   server_ip="${endpoint%:*}"
@@ -64,11 +60,24 @@ case "${1:-}" in
   printf '%s\n' "$key" > "$PROTON_RUNTIME/stealth.key"
   . /usr/share/libubox/jshn.sh
   json_init; json_add_string tun_name "$dev"; json_add_int tun_mtu 1280; json_add_string uplink_device "$uplink"
-  json_add_string protocol stealth; json_add_int socket_mark 1569; json_add_string server_ip "$server_ip"
+  json_add_string protocol "$VPN_PROTOCOL"; json_add_int socket_mark 1569; json_add_string server_ip "$server_ip"
   json_add_string server_public_key "$public"; json_add_string private_key_file "$PROTON_RUNTIME/stealth.key"
-  json_add_int connect_timeout_seconds 60; json_add_array tls_ports
+  json_add_int connect_timeout_seconds 60
+  case "$VPN_PROTOCOL" in
+   wireguard-udp) field=udp_ports; ports="${endpoint##*:}";;
+   wireguard-tcp|stealth)
+    if [ "$VPN_PROTOCOL" = stealth ]; then field=tls_ports; else field=tcp_ports; fi
+    /usr/libexec/proton-transport-metadata >/dev/null 2>&1 || true
+    ports="$(jsonfilter -i "$state/transport-ports.json" -e "@.$field[*]" 2>/dev/null || true)"
+    if [ -z "$ports" ]; then
+     /usr/libexec/proton-transport-metadata force >/dev/null 2>&1 || true
+     ports="$(jsonfilter -i "$state/transport-ports.json" -e "@.$field[*]" 2>/dev/null || true)"
+    fi;;
+   *) exit 2;;
+  esac
+  json_add_array "$field"
   count=0
-  for port in $(jsonfilter -i "$state/transport-ports.json" -e '@.tls_ports[*]'); do
+  for port in $ports; do
    case "$port" in ''|*[!0-9]*) exit 1;; esac
    [ "${#port}" -le 5 ] && [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || exit 1
    count=$((count+1)); [ "$count" -le 16 ] || exit 1; json_add_int '' "$port"
