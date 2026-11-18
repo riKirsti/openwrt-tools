@@ -121,6 +121,21 @@ jobs:
           cache_dir="$RUNNER_TEMP/tools-cache"
           output_dir="$RUNNER_TEMP/tools-apk"
           mkdir -p "$cache_dir/downloads" "$cache_dir/cargo-target" "$output_dir"
+          recipe=package/protun-openwrt/Makefile
+          version=$(sed -n 's/^PKG_VERSION:=//p' "$recipe")
+          revision=$(sed -n 's/^PKG_SOURCE_COMMIT:=//p' "$recipe")
+          source_hash=$(sed -n 's/^PKG_HASH:=//p' "$recipe")
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$revision" =~ ^[0-9a-f]{40}$ && "$source_hash" =~ ^[0-9a-f]{64}$ ]]
+          archive="$cache_dir/downloads/protunnext-$version.tar.gz"
+          if ! echo "$source_hash  $archive" | sha256sum -c --status; then
+            download=$(mktemp "$cache_dir/downloads/.protunnext.XXXXXX")
+            trap 'rm -f -- "$download"' EXIT
+            curl --fail --silent --show-error --location --proto '=https' --retry 3 --max-time 120 \
+              "https://codeload.github.com/riKirsti/ProtunNext/tar.gz/$revision" --output "$download"
+            echo "$source_hash  $download" | sha256sum -c -
+            mv -- "$download" "$archive"
+            trap - EXIT
+          fi
           sudo chown -R 1000:1000 "$cache_dir" "$output_dir"
           docker run --rm \
             --env SDK_ARCH \
