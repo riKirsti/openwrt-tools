@@ -9,7 +9,8 @@ PKG_RELEASE:=13
 PKG_SOURCE:=protunnext-$(PKG_VERSION).tar.gz
 PKG_SOURCE_COMMIT:=ba15cc9af2101742d2ead52c6b365db99c788f42
 PKG_BUILD_DIR:=$(BUILD_DIR)/ProtunNext-$(PKG_SOURCE_COMMIT)
-PKG_SOURCE_URL:=https://codeload.github.com/riKirsti/ProtunNext/tar.gz/$(PKG_SOURCE_COMMIT)?
+PKG_SOURCE_URL:=https://codeload.github.com/riKirsti/ProtunNext/tar.gz
+PKG_SOURCE_URL_FILE:=$(PKG_SOURCE_COMMIT)
 PKG_HASH:=b38c24e16657c96c96bc9d76790e2deaaf965cd5717f4ece4f25c532ceccb45b
 
 PKG_LICENSE:=GPL-3.0-or-later

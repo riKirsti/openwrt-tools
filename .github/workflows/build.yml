@@ -2,6 +2,11 @@ name: Build OpenWrt tools APKs
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      update_patch_sha:
+        type: string
+        required: true
   pull_request:
     branches:
       - main
@@ -21,7 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-openwrt-${{ github.workflow }}-${{ github.ref }}-${{ inputs.update_patch_sha || 'checkout' }}
   cancel-in-progress: true
 
 jobs:
@@ -30,7 +35,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'proton-stealth-integration' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     env:
       SDK_ARCH: aarch64_cortex-a53-25.12.6
       PACKAGES_COMMIT: 093d551675b1119a06ef224d419905e8d6b2af1a
@@ -42,6 +47,23 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        if: inputs.update_patch_sha != ''
+        with:
+          name: proposed-upstream-update
+          path: ${{ runner.temp }}/upstream-update
+      - name: Apply the exact proposed update
+        if: inputs.update_patch_sha != ''
+        env:
+          PATCH_SHA: ${{ inputs.update_patch_sha }}
+        run: |
+          patch="$RUNNER_TEMP/upstream-update/update.patch"
+          echo "$PATCH_SHA  $patch" | sha256sum -c -
+          git apply --index --whitespace=error-all "$patch"
+          sdk=$(sed -n 's/^      SDK_ARCH: //p' .github/workflows/build.yml)
+          [[ "$sdk" =~ ^[a-z0-9_-]+-[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "SDK_ARCH=$sdk" >> "$GITHUB_ENV"
 
       - name: Install prebuilt Rust and the ARM64 musl standard library
         id: rust
@@ -137,7 +159,7 @@ jobs:
           done
 
       - name: Save verified build cache before publishing
-        if: success() && steps.build.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        if: success() && inputs.update_patch_sha == '' && steps.build.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: |
@@ -145,15 +167,25 @@ jobs:
             ${{ runner.temp }}/tools-cache/cargo-target
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
+  publish:
+    needs: build
+    if: inputs.update_patch_sha == '' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/proton-stealth-integration') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: Checkout the built commit for publishing
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/proton-stealth-integration') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: true
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: openwrt-tools-${{ github.sha }}
+          path: ${{ runner.temp }}/tools-apk
+
       - name: Commit APKs to build folder
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/proton-stealth-integration') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
         env:
           APK_DIR: ${{ runner.temp }}/tools-apk

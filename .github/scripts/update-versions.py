@@ -16,6 +16,8 @@ import tomllib
 import urllib.error
 import urllib.request
 
+from adapt_protunnext import adapt
+
 
 VERSION = r"(\d+\.\d+\.\d+)"
 WORKFLOW = Path(".github/workflows/build.yml")
@@ -126,7 +128,7 @@ def manifest_version(source, path):
     return value
 
 
-def updated_source(root, name, tag, cargo, rust_version, revision=None):
+def updated_source(root, name, tag, cargo, rust_version, revision=None, model_key=""):
     project = PROJECTS[name]
     release = tag.removeprefix("v")
     url = f"https://codeload.github.com/{project['repository']}/tar.gz/{revision or tag}"
@@ -147,9 +149,15 @@ def updated_source(root, name, tag, cargo, rust_version, revision=None):
         for patch in sorted((root / "package" / name / "patches").glob("*.patch")):
             subprocess.run(["git", "apply", "--check", str(patch)], cwd=source, check=True)
             subprocess.run(["git", "apply", str(patch)], cwd=source, check=True)
+        edits = {}
         if name == "protun-openwrt":
+            edits = adapt(root, source, tag, revision, model_key)
             for client_source in (root / "package/protun-openwrt/files").glob("openwrt-*.rs"):
-                shutil.copyfile(client_source, source / client_source.name)
+                relative = client_source.relative_to(root)
+                if relative in edits:
+                    (source / client_source.name).write_bytes(edits[relative])
+                else:
+                    shutil.copyfile(client_source, source / client_source.name)
         build_source = (source / project["manifest"]).parent
         if name != "protun-openwrt":
             shutil.copyfile(root / "package" / name / "files/Cargo.lock", build_source / "Cargo.lock")
@@ -189,10 +197,10 @@ def updated_source(root, name, tag, cargo, rust_version, revision=None):
         if not any(p["name"] == project["crate"] and p["version"] == targets[0]["version"]
                    for p in lock_data["package"]):
             raise ValueError(f"Updated lockfile does not match {project['crate']}")
-    return digest, lock
+    return digest, lock, edits
 
 
-def update(root, cargo="cargo"):
+def update(root, cargo="cargo", model_key=""):
     root = root.resolve()
     workflow = (root / WORKFLOW).read_text(encoding="utf-8")
     recipes = {path.parent.name for path in root.glob("package/*/Makefile")}
@@ -237,14 +245,18 @@ def update(root, cargo="cargo"):
             if version(release) == version(current) and resolved != pinned:
                 raise ValueError(f"Published ProtunNext tag {tag} changed commit")
         if version(release) > version(current):
-            source_url = match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", makefile).group(1)
             expected_url = f"https://codeload.github.com/{project['repository']}/tar.gz/{resolved or tag}"
-            configured_url = source_url.replace("$(PKG_VERSION)", release)
             if resolved:
-                configured_url = configured_url.replace("$(PKG_SOURCE_COMMIT)", resolved)
+                source_url = match_one(r"^PKG_SOURCE_URL:=(https://[^\s?]+)$", makefile).group(1)
+                source_file = match_one(r"^PKG_SOURCE_URL_FILE:=(\S+)$", makefile).group(1)
+                configured_url = f"{source_url}/{source_file}".replace("$(PKG_SOURCE_COMMIT)", resolved)
+            else:
+                source_url = match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", makefile).group(1)
+                configured_url = source_url.replace("$(PKG_VERSION)", release)
             if configured_url != expected_url:
                 raise ValueError(f"Release tag does not match {name}'s source URL: {tag}")
-            digest, lock = updated_source(root, name, tag, cargo, rust_version, resolved)
+            digest, lock, edits = updated_source(root, name, tag, cargo, rust_version, resolved, model_key)
+            changes.update(edits)
             if resolved:
                 makefile = makefile.replace(f"PKG_SOURCE_COMMIT:={pinned}", f"PKG_SOURCE_COMMIT:={resolved}")
             makefile = re.sub(r"^PKG_VERSION:=" + VERSION + "$", "PKG_VERSION:=" + release, makefile, flags=re.MULTILINE)
@@ -273,4 +285,4 @@ if __name__ == "__main__":
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--cargo", default="cargo")
     args = parser.parse_args()
-    update(args.root, args.cargo)
+    update(args.root, args.cargo, os.environ.pop("OPENCODE_API_KEY", ""))

@@ -32,10 +32,11 @@ class UpdateTests(unittest.TestCase):
         for name, project in updater.PROJECTS.items():
             text = (self.root / "package" / name / "Makefile").read_text(encoding="utf-8")
             release = updater.match_one(r"^PKG_VERSION:=" + updater.VERSION + "$", text).group(1)
-            url = updater.match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", text).group(1)
-            tags[project["repository"]] = (
-                f"v{release}" if name == "protun-openwrt" else url.rsplit("/", 1)[1].replace("$(PKG_VERSION)", release)
-            )
+            if name == "protun-openwrt":
+                tags[project["repository"]] = f"v{release}"
+            else:
+                url = updater.match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", text).group(1)
+                tags[project["repository"]] = url.rsplit("/", 1)[1].replace("$(PKG_VERSION)", release)
         self.tags = tags
         self.latest_openwrt = self.start_patch("latest_openwrt", return_value=self.current_sdk)
         self.sdk_available = self.start_patch("sdk_available", return_value=True)
@@ -43,7 +44,7 @@ class UpdateTests(unittest.TestCase):
         recipe = (self.root / "package/protun-openwrt/Makefile").read_text(encoding="utf-8")
         self.release_commit = self.start_patch("release_commit", return_value=updater.match_one(
             r"^PKG_SOURCE_COMMIT:=(" + updater.COMMIT + ")$", recipe).group(1))
-        self.updated_source = self.start_patch("updated_source", return_value=("a" * 64, b"new lock\n"))
+        self.updated_source = self.start_patch("updated_source", return_value=("a" * 64, b"new lock\n", {}))
 
     def start_patch(self, name, **kwargs):
         patcher = patch.object(updater, name, **kwargs)
@@ -133,6 +134,20 @@ class UpdateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tag .* changed commit"):
             updater.update(self.root)
         self.assertEqual(self.snapshot(), before)
+
+
+class AdapterScopeTests(unittest.TestCase):
+    def test_adaptation_can_edit_a_client_but_cannot_change_the_release(self):
+        import adapt_protunnext as agent
+
+        client = agent.ADAPTER / "openwrt-client.rs"
+        source = Path("release/src/api/types.rs")
+        baseline = {client: b"client", source: b"upstream"}
+        self.assertEqual(agent.changes(baseline, {**baseline, client: b"updated"}), {client})
+        with self.assertRaisesRegex(ValueError, "outside"):
+            agent.changes(baseline, {**baseline, source: b"changed"})
+        with self.assertRaisesRegex(ValueError, "outside"):
+            agent.changes(baseline, {source: b"upstream"})
 
 
 if __name__ == "__main__":

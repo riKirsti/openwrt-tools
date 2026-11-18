@@ -1,6 +1,6 @@
 # OpenWrt Proton VPN client
 
-`protun-openwrt` exposes Protun 3.0.5's WireGuard UDP, WireGuard TCP and Stealth
+`protun-openwrt` exposes ProtunNext's WireGuard UDP, WireGuard TCP and Stealth
 transports, automatic candidate selection, multiple servers, and integrated
 Local Agent settings. Stealth is the default selection, not a build restriction.
 The APK installs one executable plus the OpenWrt service and configuration. It
@@ -25,7 +25,7 @@ ports. The old single `tls_port` field remains supported for existing r2/r3
 configurations. No UDP/TCP ports are guessed. A selected mode without usable
 ports fails validation. Automatic mode permits ordinary WireGuard: select
 Stealth explicitly when obfuscation is required. Selection/failover order is
-owned by Protun; this client does not claim that auto always prefers Stealth.
+owned by ProtunNext. Select Stealth explicitly when that transport is required.
 
 For multiple servers, use a `peers` array instead of the single-peer fields:
 
@@ -46,7 +46,7 @@ For multiple servers, use a `peers` array instead of the single-peer fields:
 
 The addresses and keys in examples are placeholders, not working endpoints.
 Confirm each protocol's availability and ports using the server's real metadata.
-Peers require unique IDs; their priorities pass through to Protun unchanged.
+Peers require unique IDs. The client passes their priorities to ProtunNext.
 Optional `exit_label` also passes through. `sni_strategy` accepts `random`
 (default) or `top`, matching the upstream API. Inputs are bounded to 32 peers,
 64 total port entries per peer, and 16 KiB per configuration file.

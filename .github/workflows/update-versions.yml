@@ -5,6 +5,11 @@ on:
     # UTC date parity below keeps a two-day cadence across month boundaries.
     - cron: '37 9 * * *'
   workflow_dispatch:
+    inputs:
+      preview:
+        description: Build proposed changes without pushing them
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -15,8 +20,10 @@ concurrency:
 
 jobs:
   update:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.preview)
     runs-on: ubuntu-latest
+    outputs:
+      patch_sha: ${{ steps.candidate.outputs.sha }}
     steps:
       - name: Check two-day interval
         id: interval
@@ -33,23 +40,11 @@ jobs:
             echo 'Next upstream check is on the next two-day interval'
           fi
 
-      - name: Check workflow update token
-        if: steps.interval.outputs.due == 'true'
-        shell: bash
-        env:
-          UPDATE_TOKEN: ${{ secrets.UPSTREAM_UPDATE_TOKEN }}
-        run: |
-          if [[ -z "$UPDATE_TOKEN" ]]; then
-            echo 'Add UPSTREAM_UPDATE_TOKEN with Contents and Workflows read/write access to this repository.' >&2
-            exit 1
-          fi
-
-      - name: Checkout main
+      - name: Checkout the proposed baseline
         if: steps.interval.outputs.due == 'true'
         uses: actions/checkout@v7
         with:
-          ref: main
-          token: ${{ secrets.UPSTREAM_UPDATE_TOKEN }}
+          persist-credentials: false
 
       - name: Test the version updater
         if: steps.interval.outputs.due == 'true'
@@ -68,23 +63,76 @@ jobs:
           rustup toolchain install "$rust_version" --profile minimal --no-self-update
           echo "version=$rust_version" >> "$GITHUB_OUTPUT"
 
-      - name: Check upstream versions and update package files
+      - uses: actions/setup-node@v4
+        if: steps.interval.outputs.due == 'true'
+        with:
+          node-version: '24'
+      - name: Install the pinned OpenCode client
+        if: steps.interval.outputs.due == 'true'
+        run: npm install --global opencode-ai@1.19.6
+
+      - name: Check upstream versions and prepare a candidate
         if: steps.interval.outputs.due == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RUSTUP_TOOLCHAIN: ${{ steps.rust.outputs.version }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: python3 .github/scripts/update-versions.py
 
-      - name: Commit and push version updates
+      - name: Record the exact update for qualification
         if: steps.interval.outputs.due == 'true'
+        id: candidate
         shell: bash
         run: |
           git add -- 'package/*/Makefile' 'package/*/files/Cargo.lock' \
+            package/protun-openwrt/files/openwrt-{client,config,cache,status}.rs \
             .github/workflows/build.yml
           if git diff --cached --quiet; then
             echo 'Upstream versions are already current'
             exit 0
           fi
+          git diff --cached --check
+          mkdir -p "$RUNNER_TEMP/upstream-update"
+          git diff --cached --binary > "$RUNNER_TEMP/upstream-update/update.patch"
+          echo "sha=$(sha256sum "$RUNNER_TEMP/upstream-update/update.patch" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        if: steps.candidate.outputs.sha != ''
+        with:
+          name: proposed-upstream-update
+          path: ${{ runner.temp }}/upstream-update/update.patch
+          if-no-files-found: error
+          retention-days: 14
+
+  qualify:
+    needs: update
+    if: needs.update.outputs.patch_sha != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      update_patch_sha: ${{ needs.update.outputs.patch_sha }}
+
+  publish:
+    needs: [update, qualify]
+    if: github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.preview)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          token: ${{ secrets.UPSTREAM_UPDATE_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: proposed-upstream-update
+          path: ${{ runner.temp }}/upstream-update
+      - name: Publish the exact change that passed the OpenWrt SDK gate
+        shell: bash
+        env:
+          PATCH_SHA: ${{ needs.update.outputs.patch_sha }}
+        run: |
+          patch="$RUNNER_TEMP/upstream-update/update.patch"
+          echo "$PATCH_SHA  $patch" | sha256sum -c -
+          git apply --index --whitespace=error-all "$patch"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Update upstream versions'
