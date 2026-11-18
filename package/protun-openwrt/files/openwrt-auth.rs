@@ -9,14 +9,14 @@ use super::{
 use async_compat::Compat;
 use muon::{
     App, Environment,
-    auth::LoginFlow,
+    auth::{ForkFlowResult, LoginFlow},
     cookie_store::{CookieStore, CookieStoreSetResult},
     rt::{
         Monotonic, MuonSystemTime, OperatingSystem, Resolve, SinceUnixEpoch, SystemTimeFactory,
         TcpConnect,
     },
 };
-use pvpnclient::{cookie_store, url::Url};
+use url::Url;
 use std::{
     ffi::CString,
     future::Future,
@@ -245,8 +245,13 @@ pub fn login(config: &Config, cache: &DiskCache) -> io::Result<()> {
             LoginFlow::Failed {..}=>return Err(failure("Proton login failed; verify credentials, app version and account verification requirements")),
         };
         let child=App::new(&agent.app_version).map_err(|_|failure("Invalid VPN app version"))?;
-        let selector=tokio::time::timeout(Duration::from_secs(60),pvpnclient::util::fork_muon_session(session,child))
-            .await.map_err(|_|failure("Session fork timed out"))?.map_err(|_|failure("Proton session fork failed"))?;
+        let name = child.app_version().name().ok_or_else(|| failure("Missing VPN app name"))?;
+        let fork = tokio::time::timeout(Duration::from_secs(60), session.fork(name.to_owned()).send())
+            .await.map_err(|_| failure("Session fork timed out"))?;
+        let selector = match fork {
+            ForkFlowResult::Success(_, selector) => selector,
+            ForkFlowResult::Failure { .. } => return Err(failure("Proton session fork failed")),
+        };
         // Only forward unexpired cookies scoped to the VPN API. Do not copy
         // cookies belonging to a different parent application's host.
         let vpn_api=Url::parse("https://vpn-api.proton.me/").map_err(|_|failure("Invalid VPN API URL"))?;

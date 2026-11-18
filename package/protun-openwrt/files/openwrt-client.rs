@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Protun 3.0.5 public API; OpenWrt retains ownership of network policy.
+// ProtunNext public API; OpenWrt retains ownership of network policy.
 use base64::{Engine, engine::general_purpose::STANDARD};
-use protun::api::connection::{CacheKey, Connection, PersistentCache, WgClientPrivateKey};
-use protun::api::events::{ErrorEvent, Event};
-use protun::api::state::{ConnectionState, InterfaceState, VpnState};
-use std::collections::HashMap;
+use protun_next::api::cache::MemoryCache;
+use protun_next::api::connection::{Connection, PersistentCache, WgClientPrivateKey};
+use protun_next::api::events::{ErrorEvent, Event};
+use protun_next::api::state::{ConnectionState, InterfaceState, VpnState};
 use std::ffi::CString;
 use std::fs::OpenOptions;
 use std::io::{self, Read};
@@ -84,23 +84,6 @@ fn decode_key(value: &str) -> io::Result<[u8; 32]> {
         return Err(failure("Zero keys are not valid credentials"));
     }
     Ok(bytes)
-}
-
-#[derive(Default)]
-struct MemoryCache(Mutex<HashMap<CacheKey, Vec<u8>>>);
-impl PersistentCache for MemoryCache {
-    fn put(&self, key: CacheKey, bytes: Vec<u8>) {
-        self.0.lock().unwrap().insert(key, bytes);
-    }
-    fn get(&self, key: CacheKey) -> Option<Vec<u8>> {
-        self.0.lock().unwrap().get(&key).cloned()
-    }
-    fn remove(&self, key: CacheKey) {
-        self.0.lock().unwrap().remove(&key);
-    }
-    fn clear_all(&self) {
-        self.0.lock().unwrap().clear();
-    }
 }
 
 fn device_index(device: &CString) -> u32 {

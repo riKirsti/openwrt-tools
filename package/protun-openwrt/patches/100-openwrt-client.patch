@@ -1,0 +1,32 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -13,6 +13,7 @@
+ crate-type = ["rlib", "cdylib", "staticlib"]
+ 
+ [features]
++openwrt-client = ["local-agent", "muon/login", "tokio/net", "tokio/io-util", "dep:async-compat", "dep:hickory-proto", "dep:time"]
+ default = ["local-agent", "uniffi"]
+ uniffi = ["dep:uniffi"]
+ bindgen = ["uniffi", "uniffi/cli"]
+@@ -28,6 +29,9 @@
+ local-agent = ["control-plane", "dep:proton-vpn-local-agent", "dep:muon", "dep:proton-vpn-rcrl", "dep:rand", "dep:httpdate", "dep:x509-parser", "dep:cookie_store", "dep:url"]
+ 
+ [dependencies]
++async-compat = { version = "0.2.6", optional = true }
++hickory-proto = { version = "=0.26.3", default-features = false, features = ["std"], optional = true }
++time = { version = "=0.3.55", features = ["formatting", "parsing"], optional = true }
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ thiserror = "2"
+@@ -86,6 +90,11 @@
+ path = "src/bin/uniffi-bindgen.rs"
+ required-features = ["bindgen"]
+ 
++[[bin]]
++name = "protun-openwrt"
++path = "openwrt-client.rs"
++required-features = ["openwrt-client"]
++
+ [lints.rust]
+ unsafe_op_in_unsafe_fn = "deny"
+ 

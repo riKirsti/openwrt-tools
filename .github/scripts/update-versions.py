@@ -19,6 +19,8 @@ import urllib.request
 
 VERSION = r"(\d+\.\d+\.\d+)"
 WORKFLOW = Path(".github/workflows/build.yml")
+PROTUNNEXT = "riKirsti/ProtunNext"
+COMMIT = r"[0-9a-f]{40}"
 
 
 def fetch(url, token=None, accept=None):
@@ -49,7 +51,7 @@ def latest_tag(repository):
     try:
         release = json.loads(fetch(f"https://api.github.com/repos/{repository}/releases/latest", token=token))
     except urllib.error.HTTPError as error:
-        if error.code != 404:
+        if error.code != 404 or repository == PROTUNNEXT:
             raise
     else:
         tag = release["tag_name"]
@@ -68,6 +70,14 @@ def latest_tag(repository):
     if not tags:
         raise ValueError(f"No stable releases or version tags found for {repository}")
     return max(tags, key=lambda tag: version(tag.removeprefix("v")))
+
+
+def release_commit(repository, tag):
+    token = os.environ.get("GH_TOKEN")
+    revision = json.loads(fetch(f"https://api.github.com/repos/{repository}/commits/{tag}", token=token))["sha"]
+    if not re.fullmatch(COMMIT, revision):
+        raise ValueError("Invalid release commit identity")
+    return revision
 
 
 def latest_openwrt(current):
@@ -93,9 +103,9 @@ def sdk_available(architecture, release):
 
 # Repository tags and the actual Rust build targets are not always the same version.
 PROJECTS = {
-    "protun-openwrt": {"repository": "ProtonVPN/protun", "crate": "protun",
+    "protun-openwrt": {"repository": PROTUNNEXT, "crate": "protun-next",
                "manifest": "Cargo.toml", "release_manifest": "Cargo.toml",
-               "features": ["linux", "openwrt-client"]},
+               "features": ["openwrt-client"]},
     "tailscale-rs": {"repository": "tailscale/tailscale-rs", "crate": "ts_ffi",
                      "manifest": "Cargo.toml", "release_manifest": "Cargo.toml", "features": []},
     "local-agent-rs": {"repository": "ProtonVPN/local-agent-rs", "crate": "local-agent-rs",
@@ -116,10 +126,10 @@ def manifest_version(source, path):
     return value
 
 
-def updated_source(root, name, tag, cargo, rust_version):
+def updated_source(root, name, tag, cargo, rust_version, revision=None):
     project = PROJECTS[name]
     release = tag.removeprefix("v")
-    url = f"https://codeload.github.com/{project['repository']}/tar.gz/{tag}"
+    url = f"https://codeload.github.com/{project['repository']}/tar.gz/{revision or tag}"
     archive = fetch(url)
     digest = hashlib.sha256(archive).hexdigest()
     with tempfile.TemporaryDirectory(prefix=f"{name}-update-") as temporary:
@@ -130,6 +140,8 @@ def updated_source(root, name, tag, cargo, rust_version):
         if len(directories) != 1 or not directories[0].is_dir():
             raise ValueError("Expected one source directory")
         source = directories[0]
+        if revision is not None and source.name != f"ProtunNext-{revision}":
+            raise ValueError("Archive directory does not match the pinned release commit")
         if manifest_version(source, project["release_manifest"]) != release:
             raise ValueError(f"Source manifest does not match {name} release {release}")
         for patch in sorted((root / "package" / name / "patches").glob("*.patch")):
@@ -139,10 +151,13 @@ def updated_source(root, name, tag, cargo, rust_version):
             for client_source in (root / "package/protun-openwrt/files").glob("openwrt-*.rs"):
                 shutil.copyfile(client_source, source / client_source.name)
         build_source = (source / project["manifest"]).parent
-        shutil.copyfile(root / "package" / name / "files/Cargo.lock", build_source / "Cargo.lock")
+        if name != "protun-openwrt":
+            shutil.copyfile(root / "package" / name / "files/Cargo.lock", build_source / "Cargo.lock")
         # Retain existing dependencies wherever the new manifest permits them.
         subprocess.run([cargo, "update", "--workspace"], cwd=build_source, check=True)
         features = ["--features", ",".join(project["features"])] if project["features"] else []
+        if name == "protun-openwrt":
+            features.insert(0, "--no-default-features")
         result = subprocess.run([cargo, "metadata", "--locked", "--format-version", "1",
                                  "--filter-platform", "aarch64-unknown-linux-musl", *features],
                                 cwd=build_source, check=True, capture_output=True, text=True, encoding="utf-8")
@@ -215,12 +230,23 @@ def update(root, cargo="cargo"):
         match_one(r"^PKG_HASH:=[0-9a-f]{64}$", makefile)
         tag = latest_tag(project["repository"])
         release = tag.removeprefix("v")
+        resolved = None
+        if project["repository"] == PROTUNNEXT:
+            pinned = match_one(r"^PKG_SOURCE_COMMIT:=(" + COMMIT + ")$", makefile).group(1)
+            resolved = release_commit(PROTUNNEXT, tag)
+            if version(release) == version(current) and resolved != pinned:
+                raise ValueError(f"Published ProtunNext tag {tag} changed commit")
         if version(release) > version(current):
             source_url = match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", makefile).group(1)
-            expected_url = f"https://codeload.github.com/{project['repository']}/tar.gz/{tag}"
-            if source_url.replace("$(PKG_VERSION)", release) != expected_url:
+            expected_url = f"https://codeload.github.com/{project['repository']}/tar.gz/{resolved or tag}"
+            configured_url = source_url.replace("$(PKG_VERSION)", release)
+            if resolved:
+                configured_url = configured_url.replace("$(PKG_SOURCE_COMMIT)", resolved)
+            if configured_url != expected_url:
                 raise ValueError(f"Release tag does not match {name}'s source URL: {tag}")
-            digest, lock = updated_source(root, name, tag, cargo, rust_version)
+            digest, lock = updated_source(root, name, tag, cargo, rust_version, resolved)
+            if resolved:
+                makefile = makefile.replace(f"PKG_SOURCE_COMMIT:={pinned}", f"PKG_SOURCE_COMMIT:={resolved}")
             makefile = re.sub(r"^PKG_VERSION:=" + VERSION + "$", "PKG_VERSION:=" + release, makefile, flags=re.MULTILINE)
             makefile = re.sub(r"^PKG_HASH:=[0-9a-f]{64}$", "PKG_HASH:=" + digest, makefile, flags=re.MULTILINE)
             makefile = re.sub(r"^PKG_RELEASE:=\d+$", "PKG_RELEASE:=1", makefile, flags=re.MULTILINE)

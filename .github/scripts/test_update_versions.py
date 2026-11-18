@@ -33,11 +33,16 @@ class UpdateTests(unittest.TestCase):
             text = (self.root / "package" / name / "Makefile").read_text(encoding="utf-8")
             release = updater.match_one(r"^PKG_VERSION:=" + updater.VERSION + "$", text).group(1)
             url = updater.match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", text).group(1)
-            tags[project["repository"]] = url.rsplit("/", 1)[1].replace("$(PKG_VERSION)", release)
+            tags[project["repository"]] = (
+                f"v{release}" if name == "protun-openwrt" else url.rsplit("/", 1)[1].replace("$(PKG_VERSION)", release)
+            )
         self.tags = tags
         self.latest_openwrt = self.start_patch("latest_openwrt", return_value=self.current_sdk)
         self.sdk_available = self.start_patch("sdk_available", return_value=True)
         self.latest_tag = self.start_patch("latest_tag", side_effect=tags.__getitem__)
+        recipe = (self.root / "package/protun-openwrt/Makefile").read_text(encoding="utf-8")
+        self.release_commit = self.start_patch("release_commit", return_value=updater.match_one(
+            r"^PKG_SOURCE_COMMIT:=(" + updater.COMMIT + ")$", recipe).group(1))
         self.updated_source = self.start_patch("updated_source", return_value=("a" * 64, b"new lock\n"))
 
     def start_patch(self, name, **kwargs):
@@ -108,6 +113,7 @@ class UpdateTests(unittest.TestCase):
         major, minor, micro = updater.version(current.removeprefix("v"))
         release = f"{major}.{minor}.{micro + 1}"
         self.tags[project["repository"]] = ("v" if current.startswith("v") else "") + release
+        self.release_commit.return_value = "b" * 40
         local_path = self.root / "package/proton-account/Makefile"
         local_before = local_path.read_bytes()
         (self.root / "package" / name / "files").mkdir()
@@ -116,9 +122,17 @@ class UpdateTests(unittest.TestCase):
         self.assertIn(f"PKG_VERSION:={release}\n", text)
         self.assertIn("PKG_RELEASE:=1\n", text)
         self.assertIn("PKG_HASH:=" + "a" * 64 + "\n", text)
+        self.assertIn("PKG_SOURCE_COMMIT:=" + "b" * 40 + "\n", text)
         self.assertEqual((self.root / "package" / name / "files/Cargo.lock").read_bytes(), b"new lock\n")
         self.assertEqual(local_path.read_bytes(), local_before)
         self.updated_source.assert_called_once()
+
+    def test_retargeted_protunnext_release_is_rejected(self):
+        before = self.snapshot()
+        self.release_commit.return_value = "c" * 40
+        with self.assertRaisesRegex(ValueError, "tag .* changed commit"):
+            updater.update(self.root)
+        self.assertEqual(self.snapshot(), before)
 
 
 if __name__ == "__main__":

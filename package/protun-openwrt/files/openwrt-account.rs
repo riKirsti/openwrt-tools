@@ -4,6 +4,7 @@ use super::{auth, failure};
 #[path = "openwrt-account-io.rs"]
 mod account_io;
 use base64::{Engine, engine::general_purpose::STANDARD};
+use protun_next::api::{cache::MemoryCache, keys::Identity};
 use muon::{
     App, Environment, ProtonRequest, Session, SessionCredentials,
     auth::{Auth, LoginFlow},
@@ -48,7 +49,7 @@ fn environment(raw: &str, isolated: bool) -> io::Result<Environment> {
     if raw == "https://vpn-api.proton.me" {
         return Ok(Environment::new_prod());
     }
-    let url = pvpnclient::url::Url::parse(raw).map_err(|_| failure("Invalid API URL"))?;
+    let url = url::Url::parse(raw).map_err(|_| failure("Invalid API URL"))?;
     let numeric = url
         .host_str()
         .map(|h| h.trim_matches(['[', ']']))
@@ -538,7 +539,7 @@ impl<C: Context> Api<C> {
         let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let mut request =
             ProtonRequest::new(method, route).retry_policy(RetryPolicy::default().never());
-        for (key, value) in pvpnclient::url::form_urlencoded::parse(query.as_bytes()) {
+        for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
             request = request.query((key.as_ref(), value.as_ref()));
         }
         for (key, value) in headers {
@@ -888,9 +889,10 @@ async fn operate<C: Context>(api: &Api<C>, o: &Options, path: &Path) -> io::Resu
     {
         return Err(failure("Invalid peer key"));
     }
-    let private = pvpnclient::util::generate_ed25519_private_key(rand::rng());
-    let (public, wg, _) = pvpnclient::util::derive_keys_from_ed25519_private_key(&private);
-    let mut body = json!({"ClientPublicKey":public.pem,"Duration":format!("{} min",minutes(o.text("duration"))?),"Features":features(o)});
+    let identity = Identity::load_or_generate(&MemoryCache::default())
+        .map_err(|_| failure("Cannot generate Proton client identity"))?;
+    let public = identity.public_pem().map_err(|_| failure("Cannot encode Proton public key"))?;
+    let mut body = json!({"ClientPublicKey":public.trim_end(),"Duration":format!("{} min",minutes(o.text("duration"))?),"Features":features(o)});
     if !o.flag("no-save") {
         body["Mode"] = json!("persistent");
         body["DeviceName"] = json!(o.text("device-name"));
@@ -924,7 +926,7 @@ async fn operate<C: Context>(api: &Api<C>, o: &Options, path: &Path) -> io::Resu
     let endpoint = std::net::SocketAddr::new(endpoint, 51820);
     let content = format!(
         "# Proton VPN controller credential\n[Interface]\nPrivateKey = {}\nAddress = {address}\nDNS = {dns}\n\n[Peer]\nPublicKey = {}\nAllowedIPs = {allowed}\nEndpoint = {endpoint}\n",
-        STANDARD.encode(wg.key),
+        STANDARD.encode(identity.wireguard_key()),
         text(peer, "X25519PublicKey")
     );
     if atomic_write(Path::new(o.text("output")), content.as_bytes()).is_err() {

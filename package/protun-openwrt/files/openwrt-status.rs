@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Fresh, atomic host status. Contains no keys, account tokens or certificate data.
 use super::failure;
-use protun::api::state::{ConnectionState, InterfaceState, Protocol, VpnState};
+use protun_next::api::state::{ConnectionState, InterfaceState, Protocol, VpnState};
 use serde_json::{Value, json};
 use std::{ffi::CString, fs::{File, OpenOptions}, io::{self, Write},
     os::{fd::{AsRawFd, FromRawFd}, unix::fs::{MetadataExt, OpenOptionsExt}},
