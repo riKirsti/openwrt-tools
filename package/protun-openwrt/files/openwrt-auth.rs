@@ -246,7 +246,7 @@ pub fn login(config: &Config, cache: &DiskCache) -> io::Result<()> {
         };
         let child=App::new(&agent.app_version).map_err(|_|failure("Invalid VPN app version"))?;
         let name = child.app_version().name().ok_or_else(|| failure("Missing VPN app name"))?;
-        let fork = tokio::time::timeout(Duration::from_secs(60), session.fork(name.to_owned()).send())
+        let fork = tokio::time::timeout(Duration::from_secs(60), session.fork(name.to_string()).send())
             .await.map_err(|_| failure("Session fork timed out"))?;
         let selector = match fork {
             ForkFlowResult::Success(_, selector) => selector,
