@@ -37,15 +37,15 @@ tables 600/610/620, physical transport mark 0x621, DNS selection and ZeroTier bi
 Procd supervises the new process with 30-second unlimited retries; the existing
 controller reconciles policy after TUN recreation. Transport health checks also
 restore the dynamic netifd interface, addresses, and transport routes when procd
-recreates a TUN; netifd removes a dynamic interface when its previous device
-disappears. This repair does not change LAN selectors or the selected Internet
+recreates a TUN. This repair does not change LAN selectors or the selected Internet
 mode. HTTPS retries have an explicit total retry-time limit. The new service does not start a
 VPN at boot: the existing Direct-on-boot behavior remains authoritative.
 
 The wrapper creates the exclusive nonpersistent TUN and applies `tun_mtu` through
-Linux SIOCSIFMTU before connecting. Netifd owns addresses and link state through its
-`network.add_dynamic` static-interface API. Dynamic logical-interface MTU did not
-apply on the tested OpenWrt version, so it is not relied on.
+Linux SIOCSIFMTU before connecting. The managed `protun` backend applies the tunnel
+addresses and link state directly on `pt-proton` after the worker creates it. The
+legacy Stealth backend uses netifd's dynamic static interface. Use `pt-proton` as
+the firewall zone device when migrating forwarding from kernel WireGuard.
 
 Optional `status_file` and `status_instance` enable a private atomic heartbeat. Status
 has PID, instance, boot ID, monotonic age, actual protocol and TUN state; it contains
