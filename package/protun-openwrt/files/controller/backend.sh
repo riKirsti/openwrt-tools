@@ -1,9 +1,14 @@
 # Transport context is separate from the compatible per-network VPN toggle.
 vpn_context() {
- VPN_BACKEND="$(uci -q get exitnode.main.proton_backend || echo wireguard)"
+ VPN_BACKEND="${PROTON_CONTROLLER_BACKEND:-$(uci -q get exitnode.main.proton_backend || echo wireguard)}"
  case "$VPN_BACKEND" in
   wireguard) VPN_DEV=wg-proton; VPN_PROTOCOL=wireguard-udp;;
   stealth) VPN_DEV=pt-proton; VPN_PROTOCOL=stealth;;
+  protun)
+   VPN_DEV=pt-proton
+   VPN_PROTOCOL="$(uci -q get exitnode.main.proton_protocol || echo stealth)"
+   case "$VPN_PROTOCOL" in stealth|wireguard-udp|wireguard-tcp) ;; *) return 2;; esac
+   ;;
   *) return 2;;
  esac
 }
@@ -16,7 +21,7 @@ vpn_engine_live() {
  fi
  [ -f "$PROTON_RUNTIME/stealth-wanted" ] && [ -s "$PROTON_RUNTIME/stealth-state.json" ] || return 1
  [ "$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.ready' 2>/dev/null)" = true ] || return 1
- [ "$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.protocol')" = stealth ] || return 1
+ [ "$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.protocol')" = "$VPN_PROTOCOL" ] || return 1
  latest="$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.monotonic')"
  unsigned_integer "$latest" || return 1
  now="$(monotonic_seconds)"; [ "$latest" -le "$now" ] && [ $((now-latest)) -le 3 ] || return 1
@@ -36,7 +41,7 @@ vpn_engine_ready() {
 vpn_ready() {
  local checked now pid health_pid instance
  vpn_engine_ready || return 1
- [ "$VPN_BACKEND" = stealth ] || return 0
+ [ "$VPN_BACKEND" != wireguard ] || return 0
  [ -s "$PROTON_RUNTIME/stealth-health.json" ] || return 1
  checked="$(jsonfilter -i "$PROTON_RUNTIME/stealth-health.json" -e '@.monotonic')"
  unsigned_integer "$checked" || return 1
@@ -49,7 +54,7 @@ vpn_ready() {
 }
 vpn_reconcile() {
  local family
- [ "${1:-false}" = true ] && [ "$VPN_BACKEND" = stealth ] || return 0
+ [ "${1:-false}" = true ] && [ "$VPN_BACKEND" != wireguard ] || return 0
  for family in 4 6; do
   ip -"$family" route replace unreachable default table 620 metric 32000
   if ip link show dev "$VPN_DEV" >/dev/null 2>&1; then

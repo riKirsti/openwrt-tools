@@ -113,18 +113,28 @@ fn create_tun(name: &str, mtu: Option<u16>) -> io::Result<OwnedFd> {
     if unsafe { libc::ioctl(fd.as_raw_fd(), libc::TUNSETIFF, &request) } < 0 {
         return Err(io::Error::last_os_error());
     }
+    let control = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
+    if control < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let control = unsafe { OwnedFd::from_raw_fd(control) };
     if let Some(mtu) = mtu {
-        let control = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
-        if control < 0 { return Err(io::Error::last_os_error()); }
-        let control = unsafe { OwnedFd::from_raw_fd(control) };
         request.ifr_ifru.ifru_mtu = i32::from(mtu);
         // Infer the target libc request type; musl's ioctl uses int.
         if unsafe { libc::ioctl(control.as_raw_fd(), libc::SIOCSIFMTU as _, &request) } < 0 {
             return Err(io::Error::last_os_error());
         }
     }
-    // Closing the descriptor removes this device. netifd owns addresses/link;
-    // optional MTU is applied here because dynamic interface MTU is not a device setting.
+    // The engine can receive a packet before OpenWrt finishes address setup.
+    // Bring up our device before handing its descriptor to the engine.
+    if unsafe { libc::ioctl(control.as_raw_fd(), libc::SIOCGIFFLAGS as _, &mut request) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    request.ifr_ifru.ifru_flags = unsafe { request.ifr_ifru.ifru_flags } | libc::IFF_UP as libc::c_short;
+    if unsafe { libc::ioctl(control.as_raw_fd(), libc::SIOCSIFFLAGS as _, &request) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // OpenWrt owns addresses and routes. Closing the descriptor removes the device.
     Ok(fd)
 }
 
