@@ -11,6 +11,8 @@ Build a Proton VPN client and two Rust library APKs for an ARM64 Cortex-A53 rout
 Applications use these libraries through their upstream interfaces. The `protun-openwrt`
 APK includes a client supporting WireGuard UDP, WireGuard TCP, Stealth, automatic
 protocol selection, and integrated Local Agent/account-session interfaces.
+It builds the managed connection engine from a stable ProtunNext release,
+pinned to the release commit and source archive SHA-256.
 Stealth remains the default. The OpenWrt service is disabled until configured.
 See [Stealth setup and verification](docs/stealth.md). Installing the package
 does not migrate a WireGuard interface or change ZeroTier, routing, DNS or firewall
@@ -37,12 +39,20 @@ Add the repository Actions secret `UPSTREAM_UPDATE_TOKEN`, using a token with
 **Contents** and **Workflows** read/write permissions for this repository.
 Install the updater workflow on `main`.
 
-**Update upstream versions** checks every two days; manual runs check immediately.
+**Update upstream versions** checks every two days. Manual runs check immediately
+and default to preview.
 It follows stable package releases and OpenWrt patch releases within the existing
 release series. Package versions, source hashes, and dependencies live in each
-package's `Makefile` and `files/Cargo.lock`. Updates are committed only after source
-and dependency checks succeed. A source or compiler incompatibility stops the
-update for review.
+package's `Makefile` and `files/Cargo.lock`. The exact candidate must pass
+the OpenWrt SDK build and APK tests before the workflow pushes it to `main`.
+A source or compiler incompatibility stops the update for review.
+
+For future ProtunNext releases, add the OpenCode Zen key as `OPENCODE_API_KEY`
+in this repository. The updater can then use the paid OpenCode Console model
+`opencode/deepseek-v4.1-flash` to adapt existing client, config, status and cache
+code to a new API. The model runs
+with a limited copy of public source files. The SDK qualification and
+publication jobs handle the resulting patch separately.
 
 The locally maintained `proton-account` package has no upstream release to track.
 SDK updates bump its package release along with the upstream packages.

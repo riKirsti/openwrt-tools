@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::failure;
-use protun::api::connection::{CacheKey, Cookie, Cookies, ForkSelectorInfo, PersistentCache};
+use protun_next::api::connection::{CacheKey, Cookie, Cookies, ForkSelectorInfo, PersistentCache};
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::CString,

@@ -4,20 +4,22 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=protun-openwrt
 PKG_VERSION:=3.0.5
-PKG_RELEASE:=12
+PKG_RELEASE:=13
 
-PKG_SOURCE:=protun-$(PKG_VERSION).tar.gz
-PKG_BUILD_DIR:=$(BUILD_DIR)/protun-$(PKG_VERSION)
-PKG_SOURCE_URL:=https://codeload.github.com/ProtonVPN/protun/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=a95a3cce00cfb48f604c65fc21f985b751c4b04a19beb03917f61bb0379d70ee
+PKG_SOURCE:=protunnext-$(PKG_VERSION).tar.gz
+PKG_SOURCE_COMMIT:=ba15cc9af2101742d2ead52c6b365db99c788f42
+PKG_BUILD_DIR:=$(BUILD_DIR)/ProtunNext-$(PKG_SOURCE_COMMIT)
+PKG_SOURCE_URL:=https://codeload.github.com/riKirsti/ProtunNext/tar.gz
+PKG_SOURCE_URL_FILE:=$(PKG_SOURCE_COMMIT)
+PKG_HASH:=b38c24e16657c96c96bc9d76790e2daeaf965cd5717f4ece4f25c532ceccb45b
 
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 
 TOOLS_TITLE:=Proton VPN protocol client
-TOOLS_URL:=https://github.com/ProtonVPN/protun
+TOOLS_URL:=https://github.com/riKirsti/ProtunNext
 TOOLS_DESCRIPTION:=OpenWrt Proton VPN client with UDP, TCP, Stealth and Local Agent support.
-TOOLS_CRATE:=protun
+TOOLS_CRATE:=protun-next
 TOOLS_DEPENDS:=+kmod-tun +jsonfilter
 
 define TOOLS_EXTRA_PREPARE
@@ -27,12 +29,12 @@ endef
 define TOOLS_EXTRA_COMPILE
 	+cd $(PKG_BUILD_DIR) && $(TOOLS_CARGO_ENV) \
 		$(TOOLS_CARGO) build -v --locked --bin protun-openwrt \
-			--features openwrt-client \
+			--no-default-features --features openwrt-client \
 			--profile $(CARGO_PKG_PROFILE) --target-dir $(TOOLS_CARGO_TARGET_DIR) \
 			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1)
 	+cd $(PKG_BUILD_DIR) && $(TOOLS_CARGO_ENV) \
 		$(TOOLS_CARGO) test --locked --no-run --bin protun-openwrt \
-			--features openwrt-client --profile $(CARGO_PKG_PROFILE) \
+			--no-default-features --features openwrt-client --profile $(CARGO_PKG_PROFILE) \
 			--target-dir $(TOOLS_CARGO_TARGET_DIR) --message-format=json \
 			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1) > $(PKG_BUILD_DIR)/openwrt-tests.jsonl
 endef

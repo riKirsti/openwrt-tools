@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::{decode_key, failure, interface_name, read_file};
-use protun::api::connection::{
+use protun_next::api::connection::{
     CertificateDuration, ConnectionMode, InitialConnectionConfig, IpAddress, MuonEnv, PeerInfo,
     SniStrategy, WgClientPrivateKey, WgPeerPublicKey,
 };
-use protun::api::local_agent::{LocalAgentSettings, NetshieldLevel};
-use protun::api::state::Protocol;
+use protun_next::api::local_agent::{LocalAgentSettings, NetshieldLevel};
+use protun_next::api::state::Protocol;
 use serde::Deserialize;
 use std::{io, net::IpAddr, path::Path};
 
