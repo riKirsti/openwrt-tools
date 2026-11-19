@@ -259,6 +259,7 @@ impl Options {
             "no-save",
             "non-interactive",
             "password-stdin",
+            "credentials-stdin",
             "force-refresh",
             "logout",
             "forget",
@@ -341,6 +342,13 @@ impl Options {
             self.text("api-url"),
             std::env::var_os("PROTON_SESSION_DIR").is_some(),
         )?;
+        if self.flag("credentials-stdin")
+            && (!self.flag("list-servers")
+                || self.explicit.iter().any(|key| !matches!(key.as_str(),
+                    "credentials-stdin" | "list-servers" | "json" | "free-only")))
+        {
+            return Err(failure("Credential input requires a fresh server-list login"));
+        }
         if self.flag("non-interactive")
             && (self.flag("password-stdin")
                 || !self.text("password").is_empty()
@@ -500,6 +508,47 @@ fn api_error(error: muon::Error) -> io::Error {
         ))
     }
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoginInput {
+    username: String,
+    password: String,
+    #[serde(default)]
+    mfa: String,
+    #[serde(default, rename = "ubus_rpc_session")]
+    rpc_session: String,
+}
+
+impl Drop for LoginInput {
+    fn drop(&mut self) {
+        auth::erase(&mut self.password);
+        auth::erase(&mut self.mfa);
+        auth::erase(&mut self.rpc_session);
+    }
+}
+
+fn read_login_input(input: impl Read) -> io::Result<LoginInput> {
+    const LIMIT: u64 = 27_000;
+    let mut payload = String::new();
+    let read = input.take(LIMIT + 1).read_to_string(&mut payload);
+    let parsed = if read.is_ok() && payload.len() <= LIMIT as usize {
+        serde_json::from_str::<LoginInput>(&payload).ok()
+    } else {
+        None
+    };
+    auth::erase(&mut payload);
+    let login = parsed.ok_or_else(|| failure("Invalid Proton sign-in input"))?;
+    if login.username.is_empty() || login.username.len() > 254
+        || login.username.chars().any(char::is_control)
+        || login.password.is_empty() || login.password.len() > 4096
+        || (!login.mfa.is_empty()
+            && (login.mfa.len() != 6 || !login.mfa.bytes().all(|b| b.is_ascii_digit())))
+    {
+        return Err(failure("Invalid Proton sign-in fields"));
+    }
+    Ok(login)
+}
+
 fn stdin_password() -> io::Result<String> {
     let mut value = String::new();
     io::stdin().take(4099).read_to_string(&mut value)?;
@@ -1026,6 +1075,16 @@ pub fn main(args: &[String], revoke_alias: bool) -> io::Result<()> {
         o.values
             .insert("username".into(), text(&saved, "username").into());
     }
+    let mut login = if o.flag("credentials-stdin") {
+        if saved.get("session").is_some() {
+            return Err(failure("Credential input requires a fresh authorization directory"));
+        }
+        let mut input = read_login_input(io::stdin().lock())?;
+        o.values.insert("username".into(), std::mem::take(&mut input.username));
+        Some(input)
+    } else {
+        None
+    };
     if o.text("username").is_empty() {
         if o.flag("non-interactive") {
             return Err(failure("PROTON_REAUTH_REQUIRED: account identity missing"));
@@ -1070,10 +1129,44 @@ pub fn main(args: &[String], revoke_alias: bool) -> io::Result<()> {
         let client=muon::Client::builder(app,environment(o.text("api-url"),std::env::var_os("PROTON_SESSION_DIR").is_some())?).with_operating_system(account_io::from_environment()?,rand::rng()).with_multi_thread_executor(auth::Executor).with_persistence(store.clone()).retry_policy(RetryPolicy::default().never()).without_cookie_store().with_default_headers(headers).register_sdk(sdk.clone()).build().map_err(|_|failure("Cannot initialize Proton account client"))?;
         let session=if let Some(session)=client.get_session(()).await{session}else{
             let session=client.new_session_without_credentials(()).await.map_err(|_|failure("Cannot initialize Proton login"))?;
-            let mut password=if o.flag("password-stdin"){stdin_password()?}else if !o.text("password").is_empty(){o.text("password").into()}else{auth::prompt("Password: ",true)?};
-            let flow=tokio::time::timeout(Duration::from_secs(120),session.auth().login(o.text("username"),&password)).await;auth::erase(&mut password);
-            match flow.map_err(|_|failure("Proton login timed out"))?{LoginFlow::Ok(s,_)=>s,LoginFlow::TwoFactor(flow,_)=>{if !flow.has_totp(){return Err(failure("Unsupported two-factor method; account remains unauthorized"))}let mut code=if !o.text("fixture-totp").is_empty(){o.text("fixture-totp").into()}else{auth::prompt("2FA Code: ",true)?};if code.len()!=6 || !code.bytes().all(|b|b.is_ascii_digit()){auth::erase(&mut code);return Err(failure("Six digit TOTP required"))}
-                let result=tokio::time::timeout(Duration::from_secs(60),flow.totp(&code)).await;auth::erase(&mut code);result.map_err(|_|failure("Two-factor login timed out"))?.map_err(|_|failure("Two-factor authentication failed"))?},LoginFlow::Failed{..}=>return Err(failure("Proton authentication failed; check credentials and account verification requirements"))}
+            let mut password = if let Some(input) = login.as_mut() {
+                std::mem::take(&mut input.password)
+            } else if o.flag("password-stdin") {
+                stdin_password()?
+            } else if !o.text("password").is_empty() {
+                o.text("password").into()
+            } else {
+                auth::prompt("Password: ", true)?
+            };
+            let flow = tokio::time::timeout(Duration::from_secs(120),
+                session.auth().login(o.text("username"), &password)).await;
+            auth::erase(&mut password);
+            match flow.map_err(|_| failure("Proton login timed out"))? {
+                LoginFlow::Ok(session, _) => session,
+                LoginFlow::TwoFactor(flow, _) => {
+                    if !flow.has_totp() {
+                        return Err(failure("Unsupported two-factor method; account remains unauthorized"));
+                    }
+                    let mut code = if let Some(input) = login.as_mut() {
+                        std::mem::take(&mut input.mfa)
+                    } else if !o.text("fixture-totp").is_empty() {
+                        o.text("fixture-totp").into()
+                    } else {
+                        auth::prompt("2FA Code: ", true)?
+                    };
+                    if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
+                        auth::erase(&mut code);
+                        return Err(failure("Six digit TOTP required"));
+                    }
+                    let result = tokio::time::timeout(Duration::from_secs(60), flow.totp(&code)).await;
+                    auth::erase(&mut code);
+                    result.map_err(|_| failure("Two-factor login timed out"))?
+                        .map_err(|_| failure("Two-factor authentication failed"))?
+                }
+                LoginFlow::Failed { .. } => {
+                    return Err(failure("Proton authentication failed; check credentials and account verification requirements"));
+                }
+            }
         };
         store.check()?;
         if !session.has_scope("vpn").await&&!session.has_scope("full").await{return Err(failure("PROTON_REAUTH_REQUIRED: VPN authorization scope missing"))}
@@ -1085,6 +1178,29 @@ pub fn main(args: &[String], revoke_alias: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reads_login_fields_without_terminal_or_arguments() {
+        let input = read_login_input(br#"{"username":"example","password":"demo","mfa":"012345"}"#.as_slice())
+            .expect("valid login input");
+        assert_eq!(input.username, "example");
+        assert_eq!(input.password, "demo");
+        assert_eq!(input.mfa, "012345");
+        assert!(read_login_input(br#"{"username":"example","password":"demo"}"#.as_slice()).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_signin_fields_and_conflicting_commands() {
+        for invalid in [
+            br#"{"username":"example","password":"demo","mfa":"not-a-code"}"#.as_slice(),
+            br#"{"username":"example","password":"","mfa":"012345"}"#.as_slice(),
+            br#"{"username":"example","password":"demo","server":"unexpected"}"#.as_slice(),
+        ] {
+            assert!(read_login_input(invalid).is_err());
+        }
+        assert!(read_login_input(io::repeat(b' ').take(27_001)).is_err());
+        assert!(options(&["--credentials-stdin", "--list-servers", "--json"]).flag("credentials-stdin"));
+        assert!(Options::parse(&["--credentials-stdin".into(), "--logout".into()]).is_err());
+    }
     fn options(args: &[&str]) -> Options {
         Options::parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap()
     }
