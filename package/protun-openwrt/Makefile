@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=protun-openwrt
 PKG_VERSION:=3.0.5
-PKG_RELEASE:=14
+PKG_RELEASE:=15
 
 PKG_SOURCE:=protunnext-$(PKG_VERSION).tar.gz
 PKG_SOURCE_COMMIT:=ba15cc9af2101742d2ead52c6b365db99c788f42
