@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 
-MODEL = "deepseek-v4.1-flash-free"
+MODEL = "deepseek-v4.1-flash"
 ADAPTER = Path("package/protun-openwrt/files")
 EDITABLE = {ADAPTER / f"openwrt-{name}.rs" for name in ("client", "config", "cache", "status")}
 CONTEXT = (Path("Cargo.toml"), Path("src/api"), Path("docs/deployment.md"), Path("src/requirements.json"))

@@ -48,8 +48,9 @@ the OpenWrt SDK build and APK tests before the workflow pushes it to `main`.
 A source or compiler incompatibility stops the update for review.
 
 For future ProtunNext releases, add the OpenCode Zen key as `OPENCODE_API_KEY`
-in this repository. The updater can then use DeepSeek V4.1 Flash Free to adapt
-existing client, config, status and cache code to a new API. The model runs
+in this repository. The updater can then use the paid OpenCode Console model
+`opencode/deepseek-v4.1-flash` to adapt existing client, config, status and cache
+code to a new API. The model runs
 with a limited copy of public source files. The SDK qualification and
 publication jobs handle the resulting patch separately.
 
