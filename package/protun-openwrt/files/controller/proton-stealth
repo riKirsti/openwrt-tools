@@ -7,7 +7,7 @@ state=/root/proton-private
 dev=pt-proton
 case "$VPN_BACKEND" in protun|stealth) ;; *) [ "${1:-}" = stop ] || exit 2;; esac
 stop_tunnel() {
- local attempt
+ local attempt service
  rm -f "$PROTON_RUNTIME/stealth-wanted"
  /etc/init.d/proton-stealth stop 9>&- >/dev/null 2>&1 || true
  if [ "$VPN_BACKEND" != protun ]; then
@@ -19,11 +19,18 @@ stop_tunnel() {
   ip -"$family" route flush table 620 2>/dev/null || true
  done
  rm -f "$PROTON_RUNTIME/stealth-state.json" "$PROTON_RUNTIME/stealth-health.json" "$PROTON_RUNTIME/stealth.json" "$PROTON_RUNTIME/stealth.key"
- for attempt in $(seq 1 8); do
-  [ -e /sys/class/net/"$dev" ] || return 0
+ for attempt in $(seq 1 12); do
+  if [ ! -e /sys/class/net/"$dev" ]; then
+   service="$(ubus -t 2 call service list '{"name":"proton-stealth"}')" || return 1
+   case "$service" in
+    *'"proton-stealth"'*) ;;
+    *) return 0;;
+   esac
+  fi
   sleep 1
  done
- [ ! -e /sys/class/net/"$dev" ]
+ echo 'Previous ProtunNext service did not stop' >&2
+ return 1
 }
 add_tun_interface() {
  . /usr/share/libubox/jshn.sh
@@ -65,13 +72,13 @@ case "${1:-}" in
   file="${2:-$state/active.conf}"
   case "$file" in "$state/active.conf"|"$state/pending.conf") ;; *) exit 2;; esac
   stop_tunnel
-  uplink="$(uplink_device)" || exit 1
+  uplink="$(uplink_device)" || { echo 'Could not resolve the physical uplink' >&2; exit 1; }
   endpoint="$(sed -n 's/^Endpoint[[:space:]]*=[[:space:]]*//p' "$file")"
   server_ip="${endpoint%:*}"
   case "$server_ip" in ''|*[!0-9.]*) echo 'Validated IPv4 server endpoint required' >&2; exit 1;; esac
   key="$(sed -n 's/^PrivateKey[[:space:]]*=[[:space:]]*//p' "$file")"
   public="$(sed -n 's/^PublicKey[[:space:]]*=[[:space:]]*//p' "$file")"
-  [ -n "$key" ] && [ -n "$public" ] || exit 1
+  [ -n "$key" ] && [ -n "$public" ] || { echo 'Tunnel key data is incomplete' >&2; exit 1; }
   printf '%s\n' "$key" > "$PROTON_RUNTIME/stealth.key"
   . /usr/share/libubox/jshn.sh
   json_init; json_add_string tun_name "$dev"; json_add_int tun_mtu 1280; json_add_string uplink_device "$uplink"
@@ -97,7 +104,8 @@ case "${1:-}" in
    [ "${#port}" -le 5 ] && [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || exit 1
    count=$((count+1)); [ "$count" -le 16 ] || exit 1; json_add_int '' "$port"
   done
-  [ "$count" -gt 0 ] || exit 1; json_close_array
+  [ "$count" -gt 0 ] || { echo "No port for the selected transport: $VPN_PROTOCOL" >&2; exit 1; }
+  json_close_array
   json_add_string status_file "$PROTON_RUNTIME/stealth-state.json"
   json_add_string status_instance "$(cat /proc/sys/kernel/random/uuid)"
   json_dump > "$PROTON_RUNTIME/stealth.json.new"; mv "$PROTON_RUNTIME/stealth.json.new" "$PROTON_RUNTIME/stealth.json"
@@ -121,7 +129,7 @@ case "${1:-}" in
    if ip -o address show dev "$dev" 2>/dev/null | grep -q '10.2.0.2/32' && ip -6 -o address show dev "$dev" 2>/dev/null | grep -q '2a07:b944::2:2/128'; then up=true; break; fi
    sleep 1
   done
-  [ "$up" = true ] || exit 1
+  [ "$up" = true ] || { echo 'ProtunNext TUN did not become usable' >&2; exit 1; }
   for family in 4 6; do
    while ip -"$family" rule show | grep -q '^10900:'; do ip -"$family" rule del pref 10900; done
    ip -"$family" route replace default dev "$dev" table 620 metric 10
@@ -134,9 +142,9 @@ case "${1:-}" in
   ready=false
   limit=40; [ "$1" != health ] || limit=1
   for attempt in $(seq 1 "$limit"); do if vpn_engine_live; then ready=true; break; fi; sleep 1; done
-  [ "$ready" = true ] || exit 1
-  restore_tun_interface || exit 1
-  vpn_engine_ready || exit 1
+  [ "$ready" = true ] || { echo "ProtunNext did not authenticate $VPN_PROTOCOL" >&2; exit 1; }
+  restore_tun_interface || { echo 'Could not restore ProtunNext tunnel addressing' >&2; exit 1; }
+  vpn_engine_ready || { echo 'ProtunNext tunnel is no longer ready' >&2; exit 1; }
   probe_pid="$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.pid')"
   probe_instance="$(jsonfilter -i "$PROTON_RUNTIME/stealth-state.json" -e '@.instance')"
   invalidate_health() {

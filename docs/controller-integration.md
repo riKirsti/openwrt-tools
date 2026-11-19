@@ -41,8 +41,8 @@ recreates a TUN. This repair does not change LAN selectors or the selected Inter
 mode. HTTPS retries have an explicit total retry-time limit. The new service does not start a
 VPN at boot: the existing Direct-on-boot behavior remains authoritative.
 
-The wrapper creates the exclusive nonpersistent TUN and applies `tun_mtu` through
-Linux SIOCSIFMTU before connecting. The managed `protun` backend applies the tunnel
+The wrapper creates the exclusive nonpersistent TUN, applies `tun_mtu`, and brings
+the link up before passing it to the protocol engine. The managed `protun` backend applies the tunnel
 addresses and link state directly on `pt-proton` after the worker creates it. The
 legacy Stealth backend uses netifd's dynamic static interface. Use `pt-proton` as
 the firewall zone device when migrating forwarding from kernel WireGuard.
