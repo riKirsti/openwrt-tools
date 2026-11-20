@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: update-upstream-versions
+  group: ${{ inputs.opencode_smoke && 'openwrt-opencode-smoke' || 'update-upstream-versions' }}
   cancel-in-progress: false
 
 jobs:
