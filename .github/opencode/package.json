@@ -1,1 +1,11 @@
-{"name":"protun-opencode-ci","version":"1.0.0","private":true,"dependencies":{"@opencode/cli":"2.3.2"}}
+{
+  "name": "protun-opencode-ci",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@opencode/cli": "2.3.2"
+  },
+  "config": {
+    "model": "opencode/deepseek-v4.1-flash"
+  }
+}

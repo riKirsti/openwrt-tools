@@ -14,3 +14,5 @@ runs:
         expected=$(node -p "require('./.github/opencode/package.json').dependencies['@opencode/cli']")
         test "$("$cli" --version)" = "opencode v$expected"
         echo "OPENCODE_CLI=$cli" >> "$GITHUB_ENV"
+    - shell: bash
+      run: node .github/opencode/check-upstream.mjs

@@ -7,7 +7,8 @@ import subprocess
 from tempfile import TemporaryDirectory
 
 
-MODEL = "opencode/deepseek-v4.1-flash"
+MANIFEST = Path(__file__).resolve().parents[1] / "opencode/package.json"
+MODEL = json.loads(MANIFEST.read_text(encoding="utf-8"))["config"]["model"]
 
 
 def configuration(editable):
