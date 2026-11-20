@@ -57,13 +57,17 @@ def completed_session(output):
 def verify_models(output, session):
     exported = json.loads(output)
     provider, model = MODEL.split("/")
-    expected = {"providerID": provider, "id": model}
     if exported["info"]["id"] != session:
         raise ValueError("Unexpected OpenCode session export")
     assistants = [message for message in exported["messages"] if message["type"] == "assistant"]
-    if not assistants or any(message.get("model") != expected or message.get("error")
-                             for message in assistants):
-        raise ValueError("OpenCode did not complete with the configured model")
+    if not assistants:
+        raise ValueError("OpenCode session contained no completed assistant turns")
+    for message in assistants:
+        actual = message.get("model", {})
+        if actual.get("providerID") != provider or actual.get("id") != model:
+            raise ValueError("OpenCode assistant turn used a different provider or model")
+        if message.get("error"):
+            raise ValueError("OpenCode session contained an unsuccessful assistant turn")
 
 
 def run(key, prompt, work, editable):
