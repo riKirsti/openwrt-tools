@@ -39,7 +39,7 @@ jobs:
     env:
       SDK_ARCH: aarch64_cortex-a53-25.12.6
       PACKAGES_COMMIT: 093d551675b1119a06ef224d419905e8d6b2af1a
-      RUST_VERSION: 1.99.1
+      RUST_VERSION: 1.100.0
       TOOLS_BUILD_MODE: runtime
 
     steps:
