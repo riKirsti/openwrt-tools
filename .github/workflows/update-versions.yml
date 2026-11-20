@@ -10,17 +10,36 @@ on:
         description: Build proposed changes without pushing them
         type: boolean
         default: true
+      opencode_smoke:
+        description: Verify the locked CLI and model on an isolated text fixture only
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: update-upstream-versions
+  group: ${{ inputs.opencode_smoke && 'openwrt-opencode-smoke' || 'update-upstream-versions' }}
   cancel-in-progress: false
 
 jobs:
+  opencode-smoke:
+    if: github.event_name == 'workflow_dispatch' && inputs.preview && inputs.opencode_smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - uses: ./.github/actions/setup-opencode
+      - env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: python .github/scripts/opencode_smoke.py
   update:
-    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.preview)
+    if: "!inputs.opencode_smoke && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.preview))"
     runs-on: ubuntu-latest
     outputs:
       patch_sha: ${{ steps.candidate.outputs.sha }}
@@ -42,11 +61,16 @@ jobs:
 
       - name: Checkout the proposed baseline
         if: steps.interval.outputs.due == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Test the version updater
+      - name: Set up Python for the version updater
+        if: steps.interval.outputs.due == 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Run updater tests
         if: steps.interval.outputs.due == 'true'
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
@@ -63,13 +87,8 @@ jobs:
           rustup toolchain install "$rust_version" --profile minimal --no-self-update
           echo "version=$rust_version" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-opencode
         if: steps.interval.outputs.due == 'true'
-        with:
-          node-version: '24'
-      - name: Install the pinned OpenCode client
-        if: steps.interval.outputs.due == 'true'
-        run: npm install --global opencode-ai@1.19.6
 
       - name: Check upstream versions and prepare a candidate
         if: steps.interval.outputs.due == 'true'
@@ -95,7 +114,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/upstream-update"
           git diff --cached --binary > "$RUNNER_TEMP/upstream-update/update.patch"
           echo "sha=$(sha256sum "$RUNNER_TEMP/upstream-update/update.patch" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.candidate.outputs.sha != ''
         with:
           name: proposed-upstream-update
@@ -117,11 +136,11 @@ jobs:
     if: github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.preview)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           token: ${{ secrets.UPSTREAM_UPDATE_TOKEN }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: proposed-upstream-update
           path: ${{ runner.temp }}/upstream-update

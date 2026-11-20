@@ -39,16 +39,16 @@ jobs:
     env:
       SDK_ARCH: aarch64_cortex-a53-25.12.6
       PACKAGES_COMMIT: 093d551675b1119a06ef224d419905e8d6b2af1a
-      RUST_VERSION: 1.99.1
+      RUST_VERSION: 1.100.0
       TOOLS_BUILD_MODE: runtime
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.update_patch_sha != ''
         with:
           name: proposed-upstream-update
@@ -91,7 +91,7 @@ jobs:
 
       - name: Restore SDK downloads and Rust build files
         id: cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/tools-cache/downloads
@@ -101,7 +101,7 @@ jobs:
             tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.SDK_ARCH }}-${{ steps.sdk.outputs.image-id }}-${{ env.PACKAGES_COMMIT }}-${{ env.RUST_VERSION }}-mode${{ env.TOOLS_BUILD_MODE }}-
 
       - name: Enable ARM64 library load checks
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           platforms: arm64
 
@@ -156,7 +156,7 @@ jobs:
           echo "SDK build and checks: $((SECONDS - started))s" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload verified APKs for review and device testing
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: openwrt-tools-${{ github.sha }}
           path: ${{ runner.temp }}/tools-apk/*.apk
@@ -175,7 +175,7 @@ jobs:
 
       - name: Save verified build cache before publishing
         if: success() && inputs.update_patch_sha == '' && steps.build.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/tools-cache/downloads
@@ -190,12 +190,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout the built commit for publishing
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: openwrt-tools-${{ github.sha }}
           path: ${{ runner.temp }}/tools-apk

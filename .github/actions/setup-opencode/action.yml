@@ -1,0 +1,18 @@
+name: Set up locked OpenCode
+description: Install the exact CLI and verify its reported version
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '24'
+        package-manager-cache: false
+    - shell: bash
+      run: |
+        npm ci --prefix .github/opencode --no-audit --no-fund
+        cli="$GITHUB_WORKSPACE/.github/opencode/node_modules/.bin/opencode"
+        expected=$(node -p "require('./.github/opencode/package.json').dependencies['@opencode/cli']")
+        test "$("$cli" --version)" = "opencode v$expected"
+        echo "OPENCODE_CLI=$cli" >> "$GITHUB_ENV"
+    - shell: bash
+      run: node .github/opencode/check-upstream.mjs
