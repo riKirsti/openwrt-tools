@@ -34,5 +34,10 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, TypeError, KeyError, subprocess.CalledProcessError):
+    except ValueError as error:
+        if type(error) is ValueError:
+            print(str(error), flush=True)
+        raise SystemExit("OpenCode smoke failed. No proposal or release was created.") from None
+    except (OSError, TypeError, KeyError, subprocess.CalledProcessError) as error:
+        print(f"OpenCode smoke error category: {type(error).__name__}", flush=True)
         raise SystemExit("OpenCode smoke failed. No proposal or release was created.") from None

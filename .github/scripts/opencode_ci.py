@@ -41,8 +41,13 @@ def configuration(editable):
 
 def completed_session(output):
     events = [json.loads(line) for line in output.splitlines() if line.strip()]
-    if any(event["type"] == "error" for event in events):
-        raise ValueError("OpenCode reported an error")
+    for event in events:
+        if event["type"] == "error":
+            category = event.get("error", {}).get("type", "")
+            if category not in {"provider.no-route", "provider.rate-limit", "provider.authentication",
+                                "provider.error", "session.permission", "unknown"}:
+                category = "unclassified"
+            raise ValueError(f"OpenCode inference error category: {category}")
     sessions = {event["sessionID"] for event in events if event["type"] == "step_finish"}
     if len(sessions) != 1 or not next(iter(sessions)):
         raise ValueError("OpenCode did not finish an identifiable session")
@@ -78,15 +83,20 @@ def run(key, prompt, work, editable):
             child["OPENCODE_DISABLE_CLAUDE_CODE"] = "true"
             child["OPENCODE_DISABLE_FREE_MODELS"] = "true"
             invocation = {"cwd": work, "stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL,
-                          "encoding": "utf-8", "check": True}
+                          "encoding": "utf-8", "check": False}
             execution = subprocess.run(
                 [executable, "run", "--standalone", "--format", "json", "--agent", "build",
                  "--model", MODEL, "--", prompt],
                 env={**child, "OPENCODE_API_KEY": key}, stdin=subprocess.DEVNULL, **invocation)
             session = completed_session(execution.stdout)
+            if execution.returncode:
+                raise ValueError("OpenCode inference exited unsuccessfully")
+            print("OpenCode inference completed; verifying the session export.", flush=True)
             exported = subprocess.run(
                 [executable, "session", "export", "--standalone", "--sanitize", session],
                 env=child, stdin=subprocess.DEVNULL, **invocation)
+            if exported.returncode:
+                raise ValueError("OpenCode could not export the private session")
             verify_models(exported.stdout, session)
         finally:
             config_path.unlink()
