@@ -51,7 +51,11 @@ For future ProtunNext releases, add the OpenCode Zen key as `OPENCODE_API_KEY`
 in this repository. The updater can then use the paid OpenCode Console model
 `opencode/deepseek-v4.1-flash` to adapt existing client, config, status and cache
 code to a new API. The model runs
-with a limited copy of public source files. The SDK qualification and
+with a limited copy of public source files. The updater uses the
+[locked OpenCode v2 CLI](.github/opencode/package-lock.json) in standalone mode
+and verifies the model identity before accepting edits. To test the integration
+on a text fixture, dispatch **Update upstream versions** with **preview** and
+**opencode_smoke** enabled. The SDK qualification and
 publication jobs handle the resulting patch separately.
 
 The locally maintained `proton-account` package has no upstream release to track.
