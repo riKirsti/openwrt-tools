@@ -22,7 +22,14 @@ TOOLS_DESCRIPTION:=Tailscale Rust shared library exposing the upstream C interfa
 TOOLS_LIBRARY:=libtailscalers.so
 TOOLS_CRATE:=ts_ffi
 
-TAILSCALE_HEADER:=$(PKG_BUILD_DIR)/crates/bindings/ts_ffi/tailscale.h
+TAILSCALE_FFI:=$(PKG_BUILD_DIR)/crates/bindings/ts_ffi
+TAILSCALE_HEADER:=$(PKG_BUILD_DIR)/tailscale.h
+TOOLS_CARGO_MESSAGES:=$(PKG_BUILD_DIR)/cargo-messages.jsonl
+PKG_FILE_DEPENDS+=$(TOOLS_PACKAGE_DIR)files/stage-header.py
+
+define TOOLS_EXTRA_COMPILE
+	python3 ./files/stage-header.py "$(TOOLS_CARGO_MESSAGES)" "$(TAILSCALE_FFI)" "$(TAILSCALE_HEADER)"
+endef
 
 define TOOLS_EXTRA_INSTALL
 	$(INSTALL_DIR) $(1)/usr/include

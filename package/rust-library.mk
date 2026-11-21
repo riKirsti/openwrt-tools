@@ -61,7 +61,8 @@ define Build/Compile
 			--profile $(CARGO_PKG_PROFILE) \
 			$(if $(TOOLS_FEATURES),--features $(TOOLS_FEATURES)) \
 			--target-dir $(TOOLS_CARGO_TARGET_DIR) \
-			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1)
+			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1) \
+			$(if $(TOOLS_CARGO_MESSAGES),--message-format=json-render-diagnostics > "$(TOOLS_CARGO_MESSAGES)" || { cat "$(TOOLS_CARGO_MESSAGES)"; exit 1; })
 	$(TOOLS_EXTRA_COMPILE)
 endef
 
