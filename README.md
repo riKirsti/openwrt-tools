@@ -33,8 +33,9 @@ sockets. See the [upstream examples and feature status](https://github.com/tails
 for the Rust API, separate language bindings, and supported networking features.
 
 The APK contains the C binding. It includes no router daemon, admin CLI, or
-system routing integration. The SDK check compiles and runs the example against
-the extracted APK under ARM64 emulation. Live tailnet traffic and OpenWrt router
+system routing integration. The SDK check compiles the example with the packaged
+header and runs it with the packaged library under ARM64 emulation.
+Live tailnet traffic and OpenWrt router
 installations are outside that check.
 
 ## Build

@@ -209,9 +209,11 @@ verify_tailscale_package() {
     payload="$(mktemp -d)"
     staging_dir/host/bin/apk extract --allow-untrusted --no-chown --destination "$payload" "${apks[0]}"
     cmp "$payload/usr/include/tailscale.h" "$STAGING_DIR/usr/include/tailscale.h"
+    # OpenWrt strips section headers from the runtime library. Link via the SDK
+    # and load the exact APK library at runtime.
     "$compiler" -std=c11 -Wall -Wextra -Werror -O2 \
         -I"$payload/usr/include" /feed/tailscale-rs/example.c \
-        -L"$payload/usr/lib" -ltailscalers -o "$payload/smoke"
+        -L"$STAGING_DIR/usr/lib" -ltailscalers -o "$payload/smoke"
     "$loader" --library-path "$payload/usr/lib:$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
         /tmp/tools-load-test "$payload/usr/lib/libtailscalers.so" ts_init
     "$loader" --library-path "$payload/usr/lib:$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
