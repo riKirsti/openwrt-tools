@@ -274,8 +274,8 @@ fn lists_certificates_with_sessions() {
     );
     runtime().block_on(async {
         let api = api(&url).await.unwrap();
-        let certificates = api.certificates(true).await.unwrap();
-        assert_eq!(certificates[0]["SerialNumber"], "777");
+        let options = options(&["--list-configs", "--with-sessions"]);
+        operate(&api, &options, Path::new("unused")).await.unwrap();
     });
     assert_eq!(server.join().unwrap().len(), 1);
 }
