@@ -18,6 +18,25 @@ See [Stealth setup and verification](docs/stealth.md). Installing the package
 does not migrate a WireGuard interface or change ZeroTier, routing, DNS or firewall
 configuration. The other two APKs contain libraries, not runnable VPN services.
 
+## Tailscale Rust library
+
+`tailscale-rs` packages the official upstream C ABI for OpenWrt 25.12 ARM64.
+It installs `/usr/lib/libtailscalers.so` and its generated header,
+`/usr/include/tailscale.h`. Both are also available in the SDK staging directory
+to packages that depend on `tailscale-rs`.
+
+Compile [the C smoke example](package/tailscale-rs/example.c) with the OpenWrt
+SDK compiler and link it with `-ltailscalers`. It initializes logging without
+tailnet enrollment. An application can use the upstream C API to configure
+and enroll an embedded device, obtain its addresses, and use tailnet TCP and UDP
+sockets. See the [upstream examples and feature status](https://github.com/tailscale/tailscale-rs/tree/v0.7.1#status)
+for the Rust API, separate language bindings, and supported networking features.
+
+The APK contains the C binding. It includes no router daemon, admin CLI, or
+system routing integration. The SDK check compiles and runs the example against
+the extracted APK under ARM64 emulation. Live tailnet traffic and OpenWrt router
+installations are outside that check.
+
 ## Build
 
 Commit the source files to `main`, then run **Build OpenWrt tools APKs** in
@@ -46,6 +65,11 @@ release series. Package versions, source hashes, and dependencies live in each
 package's `Makefile` and `files/Cargo.lock`. The exact candidate must pass
 the OpenWrt SDK build and APK tests before the workflow pushes it to `main`.
 A source or compiler incompatibility stops the update for review.
+
+New Tailscale Rust releases are pinned to their release commit and source hash.
+The updater qualifies the exact candidate and leaves it as a patch artifact for
+a pull request. Review the upstream changelog and C API, update this section if
+the exposed features change, and run the SDK checks on that PR.
 
 For future ProtunNext releases, add the OpenCode Zen key as `OPENCODE_API_KEY`
 in this repository. The updater can then use the paid OpenCode Console model

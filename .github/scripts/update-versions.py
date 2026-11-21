@@ -107,9 +107,10 @@ def sdk_available(architecture, release):
 PROJECTS = {
     "protun-openwrt": {"repository": PROTUNNEXT, "crate": "protun-next",
                "manifest": "Cargo.toml", "release_manifest": "Cargo.toml",
-               "features": ["openwrt-client"]},
+               "features": ["openwrt-client"], "pin_commit": True},
     "tailscale-rs": {"repository": "tailscale/tailscale-rs", "crate": "ts_ffi",
-                     "manifest": "Cargo.toml", "release_manifest": "Cargo.toml", "features": []},
+                     "manifest": "Cargo.toml", "release_manifest": "Cargo.toml",
+                     "features": [], "pin_commit": True},
     "local-agent-rs": {"repository": "ProtonVPN/local-agent-rs", "crate": "local-agent-rs",
                        "manifest": "local_agent_rs/Cargo.toml",
                        "release_manifest": "python-proton-vpn-local-agent/Cargo.toml", "features": ["uniffi"]},
@@ -142,7 +143,8 @@ def updated_source(root, name, tag, cargo, rust_version, revision=None, model_ke
         if len(directories) != 1 or not directories[0].is_dir():
             raise ValueError("Expected one source directory")
         source = directories[0]
-        if revision is not None and source.name != f"ProtunNext-{revision}":
+        archive_name = project["repository"].split("/")[-1]
+        if revision is not None and source.name != f"{archive_name}-{revision}":
             raise ValueError("Archive directory does not match the pinned release commit")
         if manifest_version(source, project["release_manifest"]) != release:
             raise ValueError(f"Source manifest does not match {name} release {release}")
@@ -239,11 +241,11 @@ def update(root, cargo="cargo", model_key=""):
         tag = latest_tag(project["repository"])
         release = tag.removeprefix("v")
         resolved = None
-        if project["repository"] == PROTUNNEXT:
+        if project.get("pin_commit"):
             pinned = match_one(r"^PKG_SOURCE_COMMIT:=(" + COMMIT + ")$", makefile).group(1)
-            resolved = release_commit(PROTUNNEXT, tag)
+            resolved = release_commit(project["repository"], tag)
             if version(release) == version(current) and resolved != pinned:
-                raise ValueError(f"Published ProtunNext tag {tag} changed commit")
+                raise ValueError(f"Published {project['repository']} tag {tag} changed commit")
         if version(release) > version(current):
             expected_url = f"https://codeload.github.com/{project['repository']}/tar.gz/{resolved or tag}"
             if resolved:

@@ -43,6 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       patch_sha: ${{ steps.candidate.outputs.sha }}
+      review_required: ${{ steps.candidate.outputs.review_required }}
     steps:
       - name: Check two-day interval
         id: interval
@@ -111,6 +112,10 @@ jobs:
             exit 0
           fi
           git diff --cached --check
+          if git diff --cached -- package/tailscale-rs/Makefile | grep '^+PKG_VERSION:=' >/dev/null; then
+            echo 'review_required=true' >> "$GITHUB_OUTPUT"
+            echo 'Review the Tailscale Rust release changes in a pull request using the proposed patch artifact.' >> "$GITHUB_STEP_SUMMARY"
+          fi
           mkdir -p "$RUNNER_TEMP/upstream-update"
           git diff --cached --binary > "$RUNNER_TEMP/upstream-update/update.patch"
           echo "sha=$(sha256sum "$RUNNER_TEMP/upstream-update/update.patch" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -133,7 +138,7 @@ jobs:
 
   publish:
     needs: [update, qualify]
-    if: github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.preview)
+    if: github.ref == 'refs/heads/main' && needs.update.outputs.review_required != 'true' && !(github.event_name == 'workflow_dispatch' && inputs.preview)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
