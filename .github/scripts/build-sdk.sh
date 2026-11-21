@@ -191,7 +191,34 @@ verify_libraries() {
             "$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
                 /tmp/tools-load-test "$(realpath "$library")" "$symbol"
         done
+        if [[ $package == tailscale-rs ]]; then
+            verify_tailscale_package "${compilers[0]}" "$loader" "$toolchain_dir"
+        fi
     done
+}
+
+verify_tailscale_package() {
+    local compiler=$1 loader=$2 toolchain_dir=$3
+    local -a apks
+    mapfile -t apks < <(find bin/packages -type f -name 'tailscale-rs-*.apk')
+    if (( ${#apks[@]} != 1 )); then
+        echo 'Expected one Tailscale Rust APK' >&2
+        return 1
+    fi
+    local payload
+    payload="$(mktemp -d)"
+    staging_dir/host/bin/apk extract --allow-untrusted --no-chown --destination "$payload" "${apks[0]}"
+    cmp "$payload/usr/include/tailscale.h" "$STAGING_DIR/usr/include/tailscale.h"
+    # OpenWrt strips section headers from the runtime library. Link via the SDK
+    # and load the exact APK library at runtime.
+    "$compiler" -std=c11 -Wall -Wextra -Werror -O2 \
+        -I"$payload/usr/include" /feed/tailscale-rs/example.c \
+        -L"$STAGING_DIR/usr/lib" -ltailscalers -o "$payload/smoke"
+    "$loader" --library-path "$payload/usr/lib:$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
+        /tmp/tools-load-test "$payload/usr/lib/libtailscalers.so" ts_init
+    "$loader" --library-path "$payload/usr/lib:$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
+        "$payload/smoke"
+    echo 'Tailscale Rust APK header and C smoke test passed'
 }
 
 export_apks() {

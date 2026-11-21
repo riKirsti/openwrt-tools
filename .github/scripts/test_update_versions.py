@@ -32,7 +32,7 @@ class UpdateTests(unittest.TestCase):
         for name, project in updater.PROJECTS.items():
             text = (self.root / "package" / name / "Makefile").read_text(encoding="utf-8")
             release = updater.match_one(r"^PKG_VERSION:=" + updater.VERSION + "$", text).group(1)
-            if name == "protun-openwrt":
+            if project.get("pin_commit"):
                 tags[project["repository"]] = f"v{release}"
             else:
                 url = updater.match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", text).group(1)
@@ -41,9 +41,13 @@ class UpdateTests(unittest.TestCase):
         self.latest_openwrt = self.start_patch("latest_openwrt", return_value=self.current_sdk)
         self.sdk_available = self.start_patch("sdk_available", return_value=True)
         self.latest_tag = self.start_patch("latest_tag", side_effect=tags.__getitem__)
-        recipe = (self.root / "package/protun-openwrt/Makefile").read_text(encoding="utf-8")
-        self.release_commit = self.start_patch("release_commit", return_value=updater.match_one(
-            r"^PKG_SOURCE_COMMIT:=(" + updater.COMMIT + ")$", recipe).group(1))
+        self.commits = {}
+        for name, project in updater.PROJECTS.items():
+            if project.get("pin_commit"):
+                recipe = (self.root / "package" / name / "Makefile").read_text(encoding="utf-8")
+                self.commits[project["repository"]] = updater.match_one(
+                    r"^PKG_SOURCE_COMMIT:=(" + updater.COMMIT + ")$", recipe).group(1)
+        self.release_commit = self.start_patch("release_commit", side_effect=lambda repo, tag: self.commits[repo])
         self.updated_source = self.start_patch("updated_source", return_value=("a" * 64, b"new lock\n", {}))
 
     def start_patch(self, name, **kwargs):
@@ -114,7 +118,7 @@ class UpdateTests(unittest.TestCase):
         major, minor, micro = updater.version(current.removeprefix("v"))
         release = f"{major}.{minor}.{micro + 1}"
         self.tags[project["repository"]] = ("v" if current.startswith("v") else "") + release
-        self.release_commit.return_value = "b" * 40
+        self.commits[project["repository"]] = "b" * 40
         local_path = self.root / "package/proton-account/Makefile"
         local_before = local_path.read_bytes()
         (self.root / "package" / name / "files").mkdir()
@@ -128,12 +132,33 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(local_path.read_bytes(), local_before)
         self.updated_source.assert_called_once()
 
-    def test_retargeted_protunnext_release_is_rejected(self):
+    def test_new_tailscale_release_uses_the_release_commit(self):
+        name = "tailscale-rs"
+        repo = updater.PROJECTS[name]["repository"]
+        current = self.tags[repo]
+        major, minor, patch_version = updater.version(current.removeprefix("v"))
+        release = f"{major}.{minor}.{patch_version + 1}"
+        self.tags[repo] = f"v{release}"
+        self.commits[repo] = "b" * 40
+        (self.root / "package" / name / "files").mkdir()
+        updater.update(self.root)
+        recipe = (self.root / "package" / name / "Makefile").read_text(encoding="utf-8")
+        self.assertIn(f"PKG_VERSION:={release}\n", recipe)
+        self.assertIn("PKG_SOURCE_COMMIT:=" + "b" * 40 + "\n", recipe)
+        self.assertIn("PKG_HASH:=" + "a" * 64 + "\n", recipe)
+        self.updated_source.assert_called_once()
+        self.assertEqual(self.updated_source.call_args.args[1:3], (name, f"v{release}"))
+        self.assertEqual(self.updated_source.call_args.args[5], "b" * 40)
+
+    def test_retargeted_pinned_release_is_rejected(self):
         before = self.snapshot()
-        self.release_commit.return_value = "c" * 40
-        with self.assertRaisesRegex(ValueError, "tag .* changed commit"):
-            updater.update(self.root)
-        self.assertEqual(self.snapshot(), before)
+        for repo, revision in list(self.commits.items()):
+            with self.subTest(repo=repo):
+                self.commits[repo] = "c" * 40
+                with self.assertRaisesRegex(ValueError, f"{repo} tag .* changed commit"):
+                    updater.update(self.root)
+                self.assertEqual(self.snapshot(), before)
+                self.commits[repo] = revision
 
 
 class AdapterScopeTests(unittest.TestCase):
