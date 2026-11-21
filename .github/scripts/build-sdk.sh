@@ -119,7 +119,8 @@ compile_packages() {
     done
 }
 
-verify_libraries() {
+configure_verification() {
+    local -a compilers target_dirs
     # Run the libraries using the SDK's ARM64 musl loader and QEMU binfmt support.
     compilers=(staging_dir/toolchain-*/bin/aarch64-openwrt-linux-musl-gcc)
     if (( ${#compilers[@]} != 1 )); then
@@ -143,15 +144,36 @@ verify_libraries() {
         echo "Missing executable SDK musl loader: $loader" >&2
         exit 1
     fi
-    echo "Checking library loading with SDK musl: $loader"
-    "${compilers[0]}" -Wall -Wextra -Werror -O2 /ci/load-library.c -o /tmp/tools-load-test -ldl
+    compiler="${compilers[0]}"
+    readelf="${compiler%-gcc}-readelf"
+    sdk_library_path="$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib"
+    sdk_runtime=("$loader" --library-path "$sdk_library_path")
+}
 
-    profile=release
+check_runtime_dependencies() {
+    local binary=$1 needed dependency
+    needed="$("$readelf" -d "$binary" | sed -n 's/.*(NEEDED).*\[\([^]]*\)\].*/\1/p')"
+    if [[ -z $needed ]]; then
+        echo "Expected SDK shared runtime dependencies in: $binary" >&2
+        return 1
+    fi
+    while IFS= read -r dependency; do
+        case "$dependency" in
+            libc.so|libgcc_s.so.1) ;;
+            *) echo "Undeclared runtime dependency: $dependency in $binary" >&2; return 1 ;;
+        esac
+    done <<< "$needed"
+}
+
+verify_libraries() {
+    echo "Checking library loading with SDK musl: $loader"
+    "$compiler" -Wall -Wextra -Werror -O2 /ci/load-library.c -o /tmp/tools-load-test -ldl
+
+    local profile=release
     if grep -qx 'CONFIG_DEBUG=y' .config; then
         profile=debug
     fi
-    local package basename symbol unpacked needed dependency library
-    readelf="${compilers[0]%-gcc}-readelf"
+    local package basename symbol unpacked library
     local -a staged
     for package in "${packages[@]}"; do
         case "$package" in
@@ -165,21 +187,7 @@ verify_libraries() {
             exit 1
         fi
 
-        # Check the built library's dependencies independently of SDK package scanning.
-        needed="$("$readelf" -d "$unpacked" | sed -n 's/.*(NEEDED).*\[\([^]]*\)\].*/\1/p')"
-        if [[ -z $needed ]]; then
-            echo "No shared-library dependencies found in: $unpacked" >&2
-            exit 1
-        fi
-        while IFS= read -r dependency; do
-            case "$dependency" in
-                libc.so|libgcc_s.so.1) ;;
-                *)
-                    echo "Undeclared runtime dependency: $dependency; update Package/$package/DEPENDS" >&2
-                    exit 1
-                    ;;
-            esac
-        done <<< "$needed"
+        check_runtime_dependencies "$unpacked"
 
         mapfile -t staged < <(find build_dir -type f -path "*/ipkg-*/$package/usr/lib/$basename")
         if (( ${#staged[@]} != 1 )); then
@@ -187,17 +195,15 @@ verify_libraries() {
             exit 1
         fi
         for library in "$unpacked" "${staged[0]}"; do
-            "$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
-                /tmp/tools-load-test "$(realpath "$library")" "$symbol"
+            "${sdk_runtime[@]}" /tmp/tools-load-test "$(realpath "$library")" "$symbol"
         done
         if [[ $package == tailscale-rs ]]; then
-            verify_tailscale_package "${compilers[0]}" "$loader" "$toolchain_dir"
+            verify_tailscale_package
         fi
     done
 }
 
 verify_tailscale_package() {
-    local compiler=$1 loader=$2 toolchain_dir=$3
     local -a apks
     mapfile -t apks < <(find bin/packages -type f -name 'tailscale-rs-*.apk')
     if (( ${#apks[@]} != 1 )); then
@@ -213,9 +219,9 @@ verify_tailscale_package() {
     "$compiler" -std=c11 -Wall -Wextra -Werror -O2 \
         -I"$payload/usr/include" /feed/tailscale-rs/example.c \
         -L"$STAGING_DIR/usr/lib" -ltailscalers -o "$payload/smoke"
-    "$loader" --library-path "$payload/usr/lib:$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
+    "$loader" --library-path "$payload/usr/lib:$sdk_library_path" \
         /tmp/tools-load-test "$payload/usr/lib/libtailscalers.so" ts_init
-    "$loader" --library-path "$payload/usr/lib:$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" \
+    "$loader" --library-path "$payload/usr/lib:$sdk_library_path" \
         "$payload/smoke"
     echo 'Tailscale Rust APK header and C smoke test passed'
 }
@@ -242,23 +248,13 @@ verify_client() {
         echo 'Expected one staged protocol client' >&2
         exit 1
     fi
-    local client fixture key needed dependency
+    local client fixture key
     client="$(realpath "${clients[0]}")"
     if find "${client%/usr/sbin/protun-openwrt}" -type f -name libprotun.so | grep -q .; then
         echo 'Client-only package unexpectedly contains libprotun.so' >&2
         exit 1
     fi
-    needed="$("$readelf" -d "$client" | sed -n 's/.*(NEEDED).*\[\([^]]*\)\].*/\1/p')"
-    if [[ -z $needed ]]; then
-        echo 'Expected the client to use the SDK shared runtime' >&2
-        exit 1
-    fi
-    while IFS= read -r dependency; do
-        case "$dependency" in
-            libc.so|libgcc_s.so.1) ;;
-            *) echo "Undeclared client dependency: $dependency" >&2; exit 1 ;;
-        esac
-    done <<< "$needed"
+    check_runtime_dependencies "$client"
     fixture=$(mktemp -d)
     key='AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='
     printf '%s\n' "$key" > "$fixture/private.key"
@@ -266,7 +262,7 @@ verify_client() {
     printf '{"tun_name":"protun0","uplink_device":"eth0","server_ip":"192.0.2.1","server_public_key":"%s","private_key_file":"%s/private.key","tls_port":443,"connect_timeout_seconds":60}\n' \
         "$key" "$fixture" > "$fixture/client.json"
     chmod 600 "$fixture/client.json"
-    local -a run_client=("$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" "$client")
+    local -a run_client=("${sdk_runtime[@]}" "$client")
     "${run_client[@]}" --help
     "${run_client[@]}" --capabilities
     "${run_client[@]}" --check-config "$fixture/client.json"
@@ -321,7 +317,7 @@ if len(tests) != 1:
 print(tests[0])
 PY
     )"
-    "$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" "$test_binary"
+    "${sdk_runtime[@]}" "$test_binary"
     echo 'ARM64 client starts and accepts/rejects configuration as expected; no network session tested'
 }
 
@@ -344,6 +340,7 @@ cd /builder
 run_phase 'Preflight' preflight
 run_phase 'SDK feeds and configuration' configure_sdk
 run_phase 'Compile and package' compile_packages
+run_phase 'Locate ARM64 verification tools' configure_verification
 run_phase 'ARM64 library checks' verify_libraries
 run_phase 'ARM64 protocol client checks' verify_client
 run_phase 'Controller integration checks' verify_integration

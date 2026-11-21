@@ -1121,14 +1121,38 @@ pub fn main(args: &[String], revoke_alias: bool) -> io::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async{
-        let app=App::new("linux-vpn-gui@5.8.7+aarch64").map_err(|_|failure("Invalid Proton app identity"))?.with_user_agent("ProtonVPN/5.8.7 (Linux; ubuntu/24.04)");
-        let sdk=Sdk::new("protun-openwrt-account",env!("CARGO_PKG_VERSION")).map_err(|_|failure("Invalid SDK identity"))?;
-        let mut headers=vec![("Accept".to_owned(),"application/json".to_owned())];
-        if !o.text("hv-token").is_empty(){headers.push(("x-pm-human-verification-token".into(),o.text("hv-token").into()));headers.push(("x-pm-human-verification-token-type".into(),"captcha".into()));}
-        let client=muon::Client::builder(app,environment(o.text("api-url"),std::env::var_os("PROTON_SESSION_DIR").is_some())?).with_operating_system(account_io::from_environment()?,rand::rng()).with_multi_thread_executor(auth::Executor).with_persistence(store.clone()).retry_policy(RetryPolicy::default().never()).without_cookie_store().with_default_headers(headers).register_sdk(sdk.clone()).build().map_err(|_|failure("Cannot initialize Proton account client"))?;
-        let session=if let Some(session)=client.get_session(()).await{session}else{
-            let session=client.new_session_without_credentials(()).await.map_err(|_|failure("Cannot initialize Proton login"))?;
+    runtime.block_on(async {
+        let app = App::new("linux-vpn-gui@5.8.7+aarch64")
+            .map_err(|_| failure("Invalid Proton app identity"))?
+            .with_user_agent("ProtonVPN/5.8.7 (Linux; ubuntu/24.04)");
+        let sdk = Sdk::new("protun-openwrt-account", env!("CARGO_PKG_VERSION"))
+            .map_err(|_| failure("Invalid SDK identity"))?;
+        let mut headers = vec![("Accept".to_owned(), "application/json".to_owned())];
+        let verification_token = o.text("hv-token");
+        if !verification_token.is_empty() {
+            headers.extend([
+                ("x-pm-human-verification-token".into(), verification_token.into()),
+                ("x-pm-human-verification-token-type".into(), "captcha".into()),
+            ]);
+        }
+        let isolated = std::env::var_os("PROTON_SESSION_DIR").is_some();
+        let client = muon::Client::builder(app, environment(o.text("api-url"), isolated)?)
+            .with_operating_system(account_io::from_environment()?, rand::rng())
+            .with_multi_thread_executor(auth::Executor)
+            .with_persistence(store.clone())
+            .retry_policy(RetryPolicy::default().never())
+            .without_cookie_store()
+            .with_default_headers(headers)
+            .register_sdk(sdk.clone())
+            .build()
+            .map_err(|_| failure("Cannot initialize Proton account client"))?;
+        let session = if let Some(session) = client.get_session(()).await {
+            session
+        } else {
+            let session = client
+                .new_session_without_credentials(())
+                .await
+                .map_err(|_| failure("Cannot initialize Proton login"))?;
             let mut password = if let Some(input) = login.as_mut() {
                 std::mem::take(&mut input.password)
             } else if o.flag("password-stdin") {
@@ -1138,8 +1162,11 @@ pub fn main(args: &[String], revoke_alias: bool) -> io::Result<()> {
             } else {
                 auth::prompt("Password: ", true)?
             };
-            let flow = tokio::time::timeout(Duration::from_secs(120),
-                session.auth().login(o.text("username"), &password)).await;
+            let flow = tokio::time::timeout(
+                Duration::from_secs(120),
+                session.auth().login(o.text("username"), &password),
+            )
+            .await;
             auth::erase(&mut password);
             match flow.map_err(|_| failure("Proton login timed out"))? {
                 LoginFlow::Ok(session, _) => session,
@@ -1169,9 +1196,18 @@ pub fn main(args: &[String], revoke_alias: bool) -> io::Result<()> {
             }
         };
         store.check()?;
-        if !session.has_scope("vpn").await&&!session.has_scope("full").await{return Err(failure("PROTON_REAUTH_REQUIRED: VPN authorization scope missing"))}
-        if o.flag("force-refresh") || o.text("session-duration")!="0" {session.refresh_auth().await.map_err(|_|failure("Proton authorization refresh failed"))?;store.check()?;}
-        let api=Api{session,store,sdk};operate(&api,&o,&path).await
+        if !session.has_scope("vpn").await && !session.has_scope("full").await {
+            return Err(failure("PROTON_REAUTH_REQUIRED: VPN authorization scope missing"));
+        }
+        if o.flag("force-refresh") || o.text("session-duration") != "0" {
+            session
+                .refresh_auth()
+                .await
+                .map_err(|_| failure("Proton authorization refresh failed"))?;
+            store.check()?;
+        }
+        let api = Api { session, store, sdk };
+        operate(&api, &o, &path).await
     })
 }
 
