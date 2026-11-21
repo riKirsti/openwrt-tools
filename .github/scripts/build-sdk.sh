@@ -155,9 +155,8 @@ verify_libraries() {
     local -a staged
     for package in "${packages[@]}"; do
         case "$package" in
-            protun-openwrt|proton-account) continue ;; # Executable packages; checked separately.
+            protun-openwrt) continue ;; # The executable has its own checks.
             tailscale-rs) basename=libtailscalers.so; symbol=ts_init ;;
-            local-agent-rs) basename=liblocal_agent_rs.so; symbol=ffi_local_agent_rs_uniffi_contract_version ;;
             *) echo "Missing library check for $package" >&2; exit 1 ;;
         esac
         unpacked="$TOOLS_CARGO_TARGET_DIR/aarch64-unknown-linux-musl/$profile/$basename"
@@ -341,32 +340,6 @@ verify_integration() {
     echo 'Integration shell syntax checked; no router policy applied'
 }
 
-verify_account() {
-    local -a accounts
-    mapfile -t accounts < <(find build_dir -type f -path '*/ipkg-*/proton-account/usr/libexec/proton-account')
-    if (( ${#accounts[@]} != 1 )); then
-        echo 'Expected one staged Proton account executable' >&2; exit 1
-    fi
-    "$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" "${accounts[0]}" --help
-    local test_binary
-    test_binary="$(python3 - <<'PY'
-import json
-from pathlib import Path
-records = list(Path('build_dir').rglob('proton-account-tests.jsonl'))
-if len(records) != 1:
-    raise SystemExit('Expected one account unit-test manifest')
-tests = [r['executable'] for line in records[0].read_text().splitlines()
-         if (r := json.loads(line)).get('reason') == 'compiler-artifact'
-         and r.get('profile', {}).get('test') and r.get('executable')
-         and r.get('target', {}).get('name') == 'proton-account']
-if len(tests) != 1:
-    raise SystemExit('Expected one account unit-test executable')
-print(tests[0])
-PY
-    )"
-    "$loader" --library-path "$toolchain_dir/lib:$STAGING_DIR/lib:$STAGING_DIR/usr/lib" "$test_binary"
-}
-
 cd /builder
 run_phase 'Preflight' preflight
 run_phase 'SDK feeds and configuration' configure_sdk
@@ -374,5 +347,4 @@ run_phase 'Compile and package' compile_packages
 run_phase 'ARM64 library checks' verify_libraries
 run_phase 'ARM64 protocol client checks' verify_client
 run_phase 'Controller integration checks' verify_integration
-run_phase 'ARM64 account checks' verify_account
 run_phase 'Export APKs' export_apks

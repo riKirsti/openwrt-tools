@@ -1,14 +1,13 @@
 # OpenWrt tools
 
-Build a Proton VPN client and two Rust library APKs for an ARM64 Cortex-A53 router:
+Build a Proton VPN client and an embedded Tailscale Rust library for an ARM64 Cortex-A53 router.
 
 | Package | Installed program or library |
 | --- | --- |
 | `protun-openwrt` | `/usr/sbin/protun-openwrt` |
 | `tailscale-rs` | `/usr/lib/libtailscalers.so` |
-| `local-agent-rs` | `/usr/lib/liblocal_agent_rs.so` |
 
-Applications use these libraries through their upstream interfaces. The `protun-openwrt`
+The `protun-openwrt`
 APK includes a client supporting WireGuard UDP, WireGuard TCP, Stealth, automatic
 protocol selection, and integrated Local Agent/account-session interfaces.
 It builds the managed connection engine from a stable ProtunNext release,
@@ -16,7 +15,7 @@ pinned to the release commit and source archive SHA-256.
 Stealth remains the default. The OpenWrt service is disabled until configured.
 See [Stealth setup and verification](docs/stealth.md). Installing the package
 does not migrate a WireGuard interface or change ZeroTier, routing, DNS or firewall
-configuration. The other two APKs contain libraries, not runnable VPN services.
+configuration.
 
 ## Tailscale Rust library
 
@@ -82,9 +81,6 @@ and verifies the model identity before accepting edits. To test the integration
 on a text fixture, dispatch **Update upstream versions** with **preview** and
 **opencode_smoke** enabled. The SDK qualification and
 publication jobs handle the resulting patch separately.
-
-The locally maintained `proton-account` package has no upstream release to track.
-SDK updates bump its package release along with the upstream packages.
 
 Run updater regression tests with
 `python3 -m unittest discover -s .github/scripts -p 'test_*.py'`.

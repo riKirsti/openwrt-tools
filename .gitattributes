@@ -9,4 +9,3 @@
 *.patch text eol=lf whitespace=-blank-at-eol
 Makefile text eol=lf
 Cargo.lock text eol=lf
-package/proton-account/files/controller/proton-tunnel text eol=lf

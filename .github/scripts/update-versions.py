@@ -107,17 +107,11 @@ def sdk_available(architecture, release):
 PROJECTS = {
     "protun-openwrt": {"repository": PROTUNNEXT, "crate": "protun-next",
                "manifest": "Cargo.toml", "release_manifest": "Cargo.toml",
-               "features": ["openwrt-client"], "pin_commit": True},
+               "features": ["openwrt-client"]},
     "tailscale-rs": {"repository": "tailscale/tailscale-rs", "crate": "ts_ffi",
                      "manifest": "Cargo.toml", "release_manifest": "Cargo.toml",
-                     "features": [], "pin_commit": True},
-    "local-agent-rs": {"repository": "ProtonVPN/local-agent-rs", "crate": "local-agent-rs",
-                       "manifest": "local_agent_rs/Cargo.toml",
-                       "release_manifest": "python-proton-vpn-local-agent/Cargo.toml", "features": ["uniffi"]},
+                     "features": []},
 }
-
-# These packages are built from this repository, without an upstream release.
-LOCAL_PACKAGES = {"proton-account"}
 
 
 def manifest_version(source, path):
@@ -129,10 +123,10 @@ def manifest_version(source, path):
     return value
 
 
-def updated_source(root, name, tag, cargo, rust_version, revision=None, model_key=""):
+def updated_source(root, name, tag, cargo, rust_version, revision, model_key=""):
     project = PROJECTS[name]
     release = tag.removeprefix("v")
-    url = f"https://codeload.github.com/{project['repository']}/tar.gz/{revision or tag}"
+    url = f"https://codeload.github.com/{project['repository']}/tar.gz/{revision}"
     archive = fetch(url)
     digest = hashlib.sha256(archive).hexdigest()
     with tempfile.TemporaryDirectory(prefix=f"{name}-update-") as temporary:
@@ -144,7 +138,7 @@ def updated_source(root, name, tag, cargo, rust_version, revision=None, model_ke
             raise ValueError("Expected one source directory")
         source = directories[0]
         archive_name = project["repository"].split("/")[-1]
-        if revision is not None and source.name != f"{archive_name}-{revision}":
+        if source.name != f"{archive_name}-{revision}":
             raise ValueError("Archive directory does not match the pinned release commit")
         if manifest_version(source, project["release_manifest"]) != release:
             raise ValueError(f"Source manifest does not match {name} release {release}")
@@ -206,7 +200,7 @@ def update(root, cargo="cargo", model_key=""):
     root = root.resolve()
     workflow = (root / WORKFLOW).read_text(encoding="utf-8")
     recipes = {path.parent.name for path in root.glob("package/*/Makefile")}
-    expected = PROJECTS.keys() | LOCAL_PACKAGES
+    expected = PROJECTS.keys()
     if recipes != expected:
         raise ValueError(
             "Package recipes and updater targets do not match: "
@@ -231,36 +225,24 @@ def update(root, cargo="cargo", model_key=""):
             raise ValueError(f"Package name does not match its folder: {name}")
         current = match_one(r"^PKG_VERSION:=" + VERSION + "$", makefile).group(1)
         revision = int(match_one(r"^PKG_RELEASE:=(\d+)$", makefile).group(1))
-        if name in LOCAL_PACKAGES:
-            if sdk_changed:
-                makefile = re.sub(r"^PKG_RELEASE:=\d+$", f"PKG_RELEASE:={revision + 1}", makefile, flags=re.MULTILINE)
-                changes[make_path] = makefile.encode()
-            continue
         project = PROJECTS[name]
         match_one(r"^PKG_HASH:=[0-9a-f]{64}$", makefile)
         tag = latest_tag(project["repository"])
         release = tag.removeprefix("v")
-        resolved = None
-        if project.get("pin_commit"):
-            pinned = match_one(r"^PKG_SOURCE_COMMIT:=(" + COMMIT + ")$", makefile).group(1)
-            resolved = release_commit(project["repository"], tag)
-            if version(release) == version(current) and resolved != pinned:
-                raise ValueError(f"Published {project['repository']} tag {tag} changed commit")
+        pinned = match_one(r"^PKG_SOURCE_COMMIT:=(" + COMMIT + ")$", makefile).group(1)
+        resolved = release_commit(project["repository"], tag)
+        if version(release) == version(current) and resolved != pinned:
+            raise ValueError(f"Published {project['repository']} tag {tag} changed commit")
         if version(release) > version(current):
-            expected_url = f"https://codeload.github.com/{project['repository']}/tar.gz/{resolved or tag}"
-            if resolved:
-                source_url = match_one(r"^PKG_SOURCE_URL:=(https://[^\s?]+)$", makefile).group(1)
-                source_file = match_one(r"^PKG_SOURCE_URL_FILE:=(\S+)$", makefile).group(1)
-                configured_url = f"{source_url}/{source_file}".replace("$(PKG_SOURCE_COMMIT)", resolved)
-            else:
-                source_url = match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", makefile).group(1)
-                configured_url = source_url.replace("$(PKG_VERSION)", release)
+            expected_url = f"https://codeload.github.com/{project['repository']}/tar.gz/{resolved}"
+            source_url = match_one(r"^PKG_SOURCE_URL:=(https://[^\s?]+)$", makefile).group(1)
+            source_file = match_one(r"^PKG_SOURCE_URL_FILE:=(\S+)$", makefile).group(1)
+            configured_url = f"{source_url}/{source_file}".replace("$(PKG_SOURCE_COMMIT)", resolved)
             if configured_url != expected_url:
                 raise ValueError(f"Release tag does not match {name}'s source URL: {tag}")
             digest, lock, edits = updated_source(root, name, tag, cargo, rust_version, resolved, model_key)
             changes.update(edits)
-            if resolved:
-                makefile = makefile.replace(f"PKG_SOURCE_COMMIT:={pinned}", f"PKG_SOURCE_COMMIT:={resolved}")
+            makefile = makefile.replace(f"PKG_SOURCE_COMMIT:={pinned}", f"PKG_SOURCE_COMMIT:={resolved}")
             makefile = re.sub(r"^PKG_VERSION:=" + VERSION + "$", "PKG_VERSION:=" + release, makefile, flags=re.MULTILINE)
             makefile = re.sub(r"^PKG_HASH:=[0-9a-f]{64}$", "PKG_HASH:=" + digest, makefile, flags=re.MULTILINE)
             makefile = re.sub(r"^PKG_RELEASE:=\d+$", "PKG_RELEASE:=1", makefile, flags=re.MULTILINE)
