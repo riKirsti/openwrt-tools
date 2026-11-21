@@ -258,3 +258,133 @@ fn persistence_failure_is_observable_and_does_not_claim_success() {
     assert!(store.check().is_err());
     assert!(store.value.lock().unwrap().get("session").is_none());
 }
+
+#[test]
+fn lists_certificates_with_sessions() {
+    let (url, server) = server(
+        |request, _| {
+            assert_eq!(request, "GET /vpn/v1/certificate/all?WithSessions=1&Limit=50");
+            (200, json!({"Code":1000,"Certificates":[{
+                "SerialNumber":"777","Mode":"persistent","DeviceName":"fixture-device",
+                "ExpirationTime":now()+3600,"ClientKeyFingerprint":"fixture-fingerprint",
+                "Features":{"NetShieldLevel":2,"RandomNAT":false,"PortForwarding":true,"SplitTCP":true}
+            }]}))
+        },
+        1,
+    );
+    runtime().block_on(async {
+        let api = api(&url).await.unwrap();
+        let certificates = api.certificates(true).await.unwrap();
+        assert_eq!(certificates[0]["SerialNumber"], "777");
+    });
+    assert_eq!(server.join().unwrap().len(), 1);
+}
+
+#[test]
+fn renewal_preserves_persistent_credential_features() {
+    let expected_features = json!({
+        "NetShieldLevel":2,"RandomNAT":false,"PortForwarding":true,
+        "SplitTCP":false,"FutureFeature":true
+    });
+    let (url, server) = server(
+        move |request, body| match request {
+            "GET /vpn/v1/certificate/all?Mode=persistent&Limit=50" => (200, json!({
+                "Code":1000,"Certificates":[{
+                    "SerialNumber":"777","ClientKey":"fixture-public-key",
+                    "DeviceName":"fixture-device","Features":expected_features
+                }]
+            })),
+            "POST /vpn/v1/certificate" => {
+                assert_eq!(body["ClientPublicKey"], "fixture-public-key");
+                assert_eq!(body["DeviceName"], "fixture-device");
+                assert_eq!(body["Mode"], "persistent");
+                assert_eq!(body["Duration"], "43200 min");
+                assert_eq!(body["Renew"], true);
+                assert_eq!(body["Features"], expected_features);
+                (200, json!({"Code":1000,"SerialNumber":"778"}))
+            }
+            _ => panic!("Unexpected fixture request: {request}"),
+        },
+        2,
+    );
+    runtime().block_on(async {
+        let api = api(&url).await.unwrap();
+        let options = options(&["--renew-serial", "777", "--duration", "30d"]);
+        operate(&api, &options, Path::new("unused")).await.unwrap();
+    });
+    assert_eq!(server.join().unwrap().len(), 2);
+}
+
+#[test]
+fn named_persistent_credential_preserves_manual_overrides() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (url, server) = server(
+        |request, body| match request {
+            "GET /vpn/v1/location" => (200, json!({
+                "Code":1000,"Country":"US","IP":"192.0.2.9"
+            })),
+            "GET /vpn/v1/logicals?SecureCoreFilter=all&WithState=true" => (200, json!({
+                "Code":1000,"LogicalServers":[{
+                    "Name":"US-PLUS#1","Status":1,"Tier":2,"Features":20,
+                    "Servers":[{
+                        "Status":1,"EntryIP":"192.0.2.1","X25519PublicKey":STANDARD.encode([1u8;32])
+                    }]
+                }]
+            })),
+            "POST /vpn/v1/certificate" => {
+                assert_eq!(body["Mode"], "persistent");
+                assert_eq!(body["DeviceName"], "future-router");
+                assert_eq!(body["Duration"], "43200 min");
+                assert_eq!(body["Features"]["NetShieldLevel"], 2);
+                assert_eq!(body["Features"]["RandomNAT"], true);
+                assert_eq!(body["Features"]["PortForwarding"], true);
+                (200, json!({
+                    "Code":1000,"SerialNumber":"777","ExpirationTime":now()+3600,"Mode":"persistent"
+                }))
+            }
+            _ => panic!("Unexpected fixture request: {request}"),
+        },
+        3,
+    );
+    let directory = fixture_path();
+    fs::create_dir(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let output = directory.join("persistent.conf");
+    runtime().block_on(async {
+        let api = api(&url).await.unwrap();
+        let options = options(&[
+            "--server", "US-PLUS#1", "--device-name", "future-router", "--duration", "30d",
+            "--ipv6", "--dns", "10.2.0.1,2a07:b944::2:1", "--allowed-ips",
+            "192.0.2.0/24,2001:db8::/32", "--netshield", "2", "--port-forwarding",
+            "--metadata-json", "--output", output.to_str().unwrap(),
+        ]);
+        operate(&api, &options, Path::new("unused")).await.unwrap();
+    });
+    let content = fs::read_to_string(&output).unwrap();
+    assert!(content.contains("DNS = 10.2.0.1, 2a07:b944::2:1"));
+    assert!(content.contains("AllowedIPs = 192.0.2.0/24, 2001:db8::/32"));
+    assert!(content.contains("Address = 10.2.0.2/32, 2a07:b944::2:2/128"));
+    assert_eq!(fs::metadata(&output).unwrap().permissions().mode() & 0o777, 0o600);
+    fs::remove_file(output).unwrap();
+    fs::remove_dir(directory).unwrap();
+    assert_eq!(server.join().unwrap().len(), 3);
+}
+
+#[test]
+fn advanced_server_filters_and_moderate_nat_match_legacy_defaults() {
+    let secure = json!({
+        "Name":"CH-PLUS#1","Status":1,"Tier":2,"Features":1,"ExitCountry":"CH","Servers":[{}]
+    });
+    let regular = json!({
+        "Name":"US-PLUS#1","Status":1,"Tier":2,"Features":4,"ExitCountry":"US","Servers":[{}]
+    });
+    let secure_core = options(&["--countries", "CH", "--secure-core"]);
+    assert!(matching(&secure, &secure_core));
+    assert!(!matching(&regular, &secure_core));
+    let p2p = options(&["--p2p-only"]);
+    assert!(matching(&regular, &p2p));
+    assert!(!matching(&secure, &p2p));
+    let nat = options(&["--moderate-nat"]);
+    assert_eq!(features(&nat)["RandomNAT"], false);
+}
