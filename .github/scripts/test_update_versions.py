@@ -1,4 +1,4 @@
-"""Regression tests for upstream and locally maintained package updates."""
+"""Regression tests for upstream package updates."""
 
 import importlib.util
 from pathlib import Path
@@ -29,24 +29,17 @@ class UpdateTests(unittest.TestCase):
         major, minor, micro = updater.version(self.current_sdk)
         self.next_sdk = f"{major}.{minor}.{micro + 1}"
         tags = {}
+        self.commits = {}
         for name, project in updater.PROJECTS.items():
             text = (self.root / "package" / name / "Makefile").read_text(encoding="utf-8")
             release = updater.match_one(r"^PKG_VERSION:=" + updater.VERSION + "$", text).group(1)
-            if project.get("pin_commit"):
-                tags[project["repository"]] = f"v{release}"
-            else:
-                url = updater.match_one(r"^PKG_SOURCE_URL:=(https://\S+)\?$", text).group(1)
-                tags[project["repository"]] = url.rsplit("/", 1)[1].replace("$(PKG_VERSION)", release)
+            tags[project["repository"]] = f"v{release}"
+            self.commits[project["repository"]] = updater.match_one(
+                r"^PKG_SOURCE_COMMIT:=(" + updater.COMMIT + ")$", text).group(1)
         self.tags = tags
         self.latest_openwrt = self.start_patch("latest_openwrt", return_value=self.current_sdk)
         self.sdk_available = self.start_patch("sdk_available", return_value=True)
         self.latest_tag = self.start_patch("latest_tag", side_effect=tags.__getitem__)
-        self.commits = {}
-        for name, project in updater.PROJECTS.items():
-            if project.get("pin_commit"):
-                recipe = (self.root / "package" / name / "Makefile").read_text(encoding="utf-8")
-                self.commits[project["repository"]] = updater.match_one(
-                    r"^PKG_SOURCE_COMMIT:=(" + updater.COMMIT + ")$", recipe).group(1)
         self.release_commit = self.start_patch("release_commit", side_effect=lambda repo, tag: self.commits[repo])
         self.updated_source = self.start_patch("updated_source", return_value=("a" * 64, b"new lock\n", {}))
 
@@ -59,14 +52,14 @@ class UpdateTests(unittest.TestCase):
     def snapshot(self):
         return {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
 
-    def test_current_releases_leave_local_and_upstream_packages_unchanged(self):
+    def test_current_releases_leave_packages_unchanged(self):
         before = self.snapshot()
         self.assertEqual(updater.update(self.root), [])
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.latest_tag.call_count, len(updater.PROJECTS))
         self.updated_source.assert_not_called()
 
-    def test_sdk_update_bumps_every_package_including_local_package(self):
+    def test_sdk_update_bumps_every_package(self):
         before = self.snapshot()
         self.latest_openwrt.return_value = self.next_sdk
         updater.update(self.root)
@@ -99,7 +92,7 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
 
     def test_missing_package_is_rejected_before_network_access(self):
-        for name in [*updater.PROJECTS, *updater.LOCAL_PACKAGES]:
+        for name in updater.PROJECTS:
             with self.subTest(package=name):
                 recipe = self.root / "package" / name / "Makefile"
                 data = recipe.read_bytes()
@@ -111,7 +104,7 @@ class UpdateTests(unittest.TestCase):
                 finally:
                     recipe.write_bytes(data)
 
-    def test_upstream_release_updates_without_changing_local_package(self):
+    def test_protunnext_update_leaves_tailscale_unchanged(self):
         name = "protun-openwrt"
         project = updater.PROJECTS[name]
         current = self.tags[project["repository"]]
@@ -119,8 +112,8 @@ class UpdateTests(unittest.TestCase):
         release = f"{major}.{minor}.{micro + 1}"
         self.tags[project["repository"]] = ("v" if current.startswith("v") else "") + release
         self.commits[project["repository"]] = "b" * 40
-        local_path = self.root / "package/proton-account/Makefile"
-        local_before = local_path.read_bytes()
+        tailscale_path = self.root / "package/tailscale-rs/Makefile"
+        tailscale_before = tailscale_path.read_bytes()
         (self.root / "package" / name / "files").mkdir()
         updater.update(self.root)
         text = (self.root / "package" / name / "Makefile").read_text(encoding="utf-8")
@@ -129,7 +122,7 @@ class UpdateTests(unittest.TestCase):
         self.assertIn("PKG_HASH:=" + "a" * 64 + "\n", text)
         self.assertIn("PKG_SOURCE_COMMIT:=" + "b" * 40 + "\n", text)
         self.assertEqual((self.root / "package" / name / "files/Cargo.lock").read_bytes(), b"new lock\n")
-        self.assertEqual(local_path.read_bytes(), local_before)
+        self.assertEqual(tailscale_path.read_bytes(), tailscale_before)
         self.updated_source.assert_called_once()
 
     def test_new_tailscale_release_uses_the_release_commit(self):

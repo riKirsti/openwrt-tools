@@ -2,9 +2,8 @@
 
 `protun-openwrt` exposes ProtunNext's WireGuard UDP, WireGuard TCP and Stealth
 transports, automatic candidate selection, multiple servers, and integrated
-Local Agent settings. Stealth is the default selection, not a build restriction.
-The APK installs one executable plus the OpenWrt service and configuration. It
-does not install `libprotun.so` or require the separate `local-agent-rs` APK.
+Local Agent settings. Stealth is the default selection. The APK installs one
+executable plus the OpenWrt service and configuration.
 
 The service is disabled by default. No installation script rewrites network,
 DNS, firewall, PBR, or ZeroTier settings. Existing ZeroTier connections retain their role and configuration.
