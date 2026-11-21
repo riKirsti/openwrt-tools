@@ -154,9 +154,7 @@ jobs:
         env:
           PATCH_SHA: ${{ needs.update.outputs.patch_sha }}
         run: |
-          patch="$RUNNER_TEMP/upstream-update/update.patch"
-          echo "$PATCH_SHA  $patch" | sha256sum -c -
-          git apply --index --whitespace=error-all "$patch"
+          bash .github/scripts/apply-update.sh "$RUNNER_TEMP/upstream-update/update.patch" "$PATCH_SHA"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Update upstream versions'

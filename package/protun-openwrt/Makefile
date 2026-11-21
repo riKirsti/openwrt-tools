@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=protun-openwrt
 PKG_VERSION:=3.0.5
-PKG_RELEASE:=15
+PKG_RELEASE:=16
 
 PKG_SOURCE:=protunnext-$(PKG_VERSION).tar.gz
 PKG_SOURCE_COMMIT:=ba15cc9af2101742d2ead52c6b365db99c788f42
@@ -26,27 +26,24 @@ define TOOLS_EXTRA_PREPARE
 	$(CP) ./files/openwrt-*.rs $(PKG_BUILD_DIR)/
 endef
 
+PROTUN_CLIENT_FLAGS = $(TOOLS_CARGO_FLAGS) --bin protun-openwrt \
+	--no-default-features --features openwrt-client
+
 define TOOLS_EXTRA_COMPILE
 	+cd $(PKG_BUILD_DIR) && $(TOOLS_CARGO_ENV) \
-		$(TOOLS_CARGO) build -v --locked --bin protun-openwrt \
-			--no-default-features --features openwrt-client \
-			--profile $(CARGO_PKG_PROFILE) --target-dir $(TOOLS_CARGO_TARGET_DIR) \
-			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1)
+		$(TOOLS_CARGO) build -v $(PROTUN_CLIENT_FLAGS)
 	+cd $(PKG_BUILD_DIR) && $(TOOLS_CARGO_ENV) \
-		$(TOOLS_CARGO) test --locked --no-run --bin protun-openwrt \
-			--no-default-features --features openwrt-client --profile $(CARGO_PKG_PROFILE) \
-			--target-dir $(TOOLS_CARGO_TARGET_DIR) --message-format=json \
-			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1) > $(PKG_BUILD_DIR)/openwrt-tests.jsonl
+		$(TOOLS_CARGO) test $(PROTUN_CLIENT_FLAGS) --no-run --message-format=json \
+			> $(PKG_BUILD_DIR)/openwrt-tests.jsonl
 endef
 
 define TOOLS_EXTRA_INSTALL
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/init.d $(1)/etc/config $(1)/etc/protun
+	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/libexec $(1)/usr/lib/exitnode \
+		$(1)/etc/init.d $(1)/etc/config $(1)/etc/protun
 	$(INSTALL_BIN) $(TOOLS_CARGO_TARGET_DIR)/$(RUSTC_TARGET_ARCH)/$(CARGO_OUTPUT_DIR)/protun-openwrt $(1)/usr/sbin/
-	$(INSTALL_DIR) $(1)/usr/libexec
 	$(INSTALL_BIN) ./files/protun.init $(1)/etc/init.d/protun
 	$(INSTALL_CONF) ./files/protun.config $(1)/etc/config/protun
 	$(INSTALL_DATA) ./files/*.json.example $(1)/etc/protun/
-	$(INSTALL_DIR) $(1)/usr/lib/exitnode $(1)/usr/libexec
 	$(INSTALL_DATA) ./files/controller/backend.sh $(1)/usr/lib/exitnode/
 	$(INSTALL_BIN) ./files/controller/proton-tunnel ./files/controller/proton-stealth ./files/controller/proton-transport-metadata $(1)/usr/libexec/
 	$(INSTALL_BIN) ./files/controller/proton-stealth.init $(1)/etc/init.d/proton-stealth

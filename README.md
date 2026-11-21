@@ -7,8 +7,7 @@ Build a Proton VPN client and an embedded Tailscale Rust library for an ARM64 Co
 | `protun-openwrt` | `/usr/sbin/protun-openwrt` |
 | `tailscale-rs` | `/usr/lib/libtailscalers.so` |
 
-The `protun-openwrt`
-APK includes a client supporting WireGuard UDP, WireGuard TCP, Stealth, automatic
+The `protun-openwrt` APK supports WireGuard UDP, WireGuard TCP, Stealth, automatic
 protocol selection, and integrated Local Agent/account-session interfaces.
 It builds the managed connection engine from a stable ProtunNext release,
 pinned to the release commit and source archive SHA-256.
@@ -34,64 +33,11 @@ for the Rust API, separate language bindings, and supported networking features.
 The APK contains the C binding. It includes no router daemon, admin CLI, or
 system routing integration. The SDK check compiles the example with the packaged
 header and runs it with the packaged library under ARM64 emulation.
-Live tailnet traffic and OpenWrt router
-installations are outside that check.
+Live tailnet traffic and OpenWrt installations require separate device testing.
 
-## Build
+## Documentation
 
-Commit the source files to `main`, then run **Build OpenWrt tools APKs** in
-GitHub Actions. Package and build-script changes also start a build automatically.
-Successful builds on `main` commit one latest APK per package to `build/`.
-Pull requests build and verify without publishing.
-
-The SDK tag, pinned Rust version, and build mode are in
-`.github/workflows/build.yml`. `runtime` mode uses optimization level 3 and
-ThinLTO. `fast` mode uses optimization level 1 with LTO disabled.
-
-CI uses prebuilt Rust with the OpenWrt linker and caches downloads and compilation
-outputs. Building this feed outside CI requires a compatible Rust toolchain and
-the OpenWrt packages feed's Rust helpers.
-
-## Automatic updates
-
-Add the repository Actions secret `UPSTREAM_UPDATE_TOKEN`, using a token with
-**Contents** and **Workflows** read/write permissions for this repository.
-Install the updater workflow on `main`.
-
-**Update upstream versions** checks every two days. Manual runs check immediately
-and default to preview.
-It follows stable package releases and OpenWrt patch releases within the existing
-release series. Package versions, source hashes, and dependencies live in each
-package's `Makefile` and `files/Cargo.lock`. The exact candidate must pass
-the OpenWrt SDK build and APK tests before the workflow pushes it to `main`.
-A source or compiler incompatibility stops the update for review.
-
-New Tailscale Rust releases are pinned to their release commit and source hash.
-The updater qualifies the exact candidate and leaves it as a patch artifact for
-a pull request. Review the upstream changelog and C API, update this section if
-the exposed features change, and run the SDK checks on that PR.
-
-For future ProtunNext releases, add the OpenCode Zen key as `OPENCODE_API_KEY`
-in this repository. The updater can then use the paid OpenCode Console model
-`opencode/deepseek-v4.1-flash` to adapt existing client, config, status and cache
-code to a new API. The model runs
-with a limited copy of public source files. The updater uses the
-[locked OpenCode v2 CLI](.github/opencode/package-lock.json) in standalone mode
-and verifies the model identity before accepting edits. To test the integration
-on a text fixture, dispatch **Update upstream versions** with **preview** and
-**opencode_smoke** enabled. The SDK qualification and
-publication jobs handle the resulting patch separately.
-
-Run updater regression tests with
-`python3 -m unittest discover -s .github/scripts -p 'test_*.py'`.
-
-## Layout
-
-- `package/*/Makefile`: package sources, versions, library names, and features.
-- `package/rust-library.mk`: shared Rust compilation and installation rules.
-- `.github/scripts/build-sdk.sh`: SDK setup, compilation, and ARM64 load checks.
-- `.github/scripts/publish-apks.sh`: latest-only APK publishing.
-- `.github/scripts/update-versions.py`: upstream checks and version updates.
-
-Library load checks verify linking and exported symbols. Router functionality and
-VPN connectivity require device testing.
+- [Development and upstream updates](docs/development.md)
+- [Build and package](docs/building.md)
+- [Deploy the Proton VPN client](docs/stealth.md)
+- [Deploy with an exit-node controller](docs/controller-integration.md)

@@ -12,10 +12,13 @@ vpn_context() {
   *) return 2;;
  esac
 }
+vpn_device_is_up() {
+ ip -o link show dev "$1" 2>/dev/null | grep -Eq '<([^>]*,)?UP(,|>)'
+}
 vpn_engine_live() {
  local latest now pid boot instance configured
  if [ "$VPN_BACKEND" = wireguard ]; then
-  ip -o link show dev wg-proton 2>/dev/null | grep -Eq '<([^>]*,)?UP(,|>)' || return 1
+  vpn_device_is_up wg-proton || return 1
   latest="$(wg show wg-proton latest-handshakes 2>/dev/null | awk '$2 > latest {latest=$2} END {print latest+0}')"
   now="$(date +%s)"; [ "$latest" -gt 0 ] && [ "$latest" -le "$now" ] && [ $((now-latest)) -le 180 ]; return
  fi
@@ -36,7 +39,7 @@ vpn_engine_live() {
 }
 vpn_engine_ready() {
  vpn_engine_live || return 1
- ip -o link show dev "$VPN_DEV" 2>/dev/null | grep -Eq '<([^>]*,)?UP(,|>)'
+ vpn_device_is_up "$VPN_DEV"
 }
 vpn_ready() {
  local checked now pid health_pid instance

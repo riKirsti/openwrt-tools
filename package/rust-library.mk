@@ -53,15 +53,16 @@ TOOLS_CARGO_ENV = $(CARGO_PKG_VARS) $(TOOLS_PROFILE_VARS) \
 	TARGET_AR="$(TARGET_AR)" TARGET_CXX="$(TARGET_CXX_NOCACHE)" \
 	TARGET_CXXFLAGS="$(TARGET_CXXFLAGS) $(RUSTC_CFLAGS)" $(TOOLS_RUST_VARS)
 
+TOOLS_CARGO_FLAGS = --locked --profile $(CARGO_PKG_PROFILE) \
+	--target-dir $(TOOLS_CARGO_TARGET_DIR) \
+	$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1)
+
 define Build/Compile
 	+cd $(PKG_BUILD_DIR) && \
 		$(TOOLS_CARGO_ENV) \
-		$(TOOLS_CARGO) rustc -v --locked --lib --crate-type cdylib \
+		$(TOOLS_CARGO) rustc -v $(TOOLS_CARGO_FLAGS) --lib --crate-type cdylib \
 			--package $(TOOLS_CRATE) --manifest-path $(TOOLS_MANIFEST) \
-			--profile $(CARGO_PKG_PROFILE) \
 			$(if $(TOOLS_FEATURES),--features $(TOOLS_FEATURES)) \
-			--target-dir $(TOOLS_CARGO_TARGET_DIR) \
-			$(if $(filter --jobserver%,$(PKG_JOBS)),,-j1) \
 			$(if $(TOOLS_CARGO_MESSAGES),--message-format=json-render-diagnostics > "$(TOOLS_CARGO_MESSAGES)" || { cat "$(TOOLS_CARGO_MESSAGES)"; exit 1; })
 	$(TOOLS_EXTRA_COMPILE)
 endef
