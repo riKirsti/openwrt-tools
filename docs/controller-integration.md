@@ -33,7 +33,7 @@ selected transport and preserves the controller's fail-closed policy. The existi
 `wireguard` and `stealth` backends remain available for compatible deployments.
 
 The adapter retains the existing controller's locks, transaction/credential ownership,
-tables 600/610/620, physical transport mark 0x621, DNS selection and ZeroTier binding.
+routing tables, physical transport mark, DNS selection, and interface bindings.
 Procd supervises the new process with 30-second unlimited retries; the existing
 controller reconciles policy after TUN recreation. Transport health checks also
 restore the dynamic netifd interface, addresses, and transport routes when procd

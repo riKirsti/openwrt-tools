@@ -1,4 +1,4 @@
-"""Run the pinned OpenCode CLI and verify the model before accepting edits."""
+"""Run the pinned inference CLI and verify the model before accepting edits."""
 
 import json
 import os
