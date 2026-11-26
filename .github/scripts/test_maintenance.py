@@ -42,6 +42,16 @@ class MaintenanceTests(unittest.TestCase):
             return ({"apk_bytes": {"tailscale-rs": base}}, {"apk_bytes": {"tailscale-rs": candidate}})
         self.assertEqual(decide("apk_bytes", "tailscale-rs", [size(200, 180), size(200, 181)]), "inconclusive")
 
+    def test_screen_only_repeats_a_pair_with_a_gain_on_the_claimed_metric(self):
+        screen = load("measure-sdk").worth_repeating
+        self.assertFalse(screen("cold_build_seconds", "feed", {"cold_build_seconds": 10},
+                                {"cold_build_seconds": 10}))
+        self.assertTrue(screen("cold_build_seconds", "feed", {"cold_build_seconds": 10},
+                               {"cold_build_seconds": 9}))
+        self.assertFalse(screen("apk_bytes", "tailscale-rs",
+                                {"apk_bytes": {"tailscale-rs": 90, "protun-openwrt": 90}},
+                                {"apk_bytes": {"tailscale-rs": 91, "protun-openwrt": 70}}))
+
     @unittest.skipUnless(shutil.which("bash") and os.name != "nt", "requires the Linux qualification shell")
     def test_patch_with_wrong_digest_or_base_leaves_checkout_clean(self):
         with tempfile.TemporaryDirectory() as folder:

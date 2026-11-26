@@ -25,7 +25,6 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'proton-stealth-integration' || github.event.pull_request.head.repo.full_name != github.repository
     permissions:
       contents: read
     uses: ./.github/workflows/sdk-build.yml
@@ -38,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      checks: write
     steps:
       - name: Checkout the built commit for publishing
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,6 +53,7 @@ jobs:
       - name: Commit APKs to build folder
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           APK_DIR: ${{ runner.temp }}/tools-apk
           PUBLISH_BRANCH: ${{ github.ref_name }}
         run: |

@@ -39,4 +39,4 @@ fi
 git config user.name 'github-actions[bot]'
 git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 git commit -m 'Update tools APKs in build/'
-git push origin "HEAD:refs/heads/$PUBLISH_BRANCH"
+bash .github/scripts/push-qualified.sh "$PUBLISH_BRANCH"
