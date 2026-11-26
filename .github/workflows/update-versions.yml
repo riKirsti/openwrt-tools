@@ -27,7 +27,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ inputs.opencode_smoke && 'openwrt-opencode-smoke' || 'update-upstream-versions' }}
+  group: >-
+    ${{ github.event_name == 'workflow_dispatch' && inputs.preview
+        && format('openwrt-preview-{0}-{1}-{2}-{3}', github.ref, inputs.replay, inputs.maintenance, inputs.opencode_smoke)
+        || 'update-upstream-versions' }}
   cancel-in-progress: false
 
 jobs:
