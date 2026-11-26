@@ -2,14 +2,22 @@ name: Update upstream versions
 
 on:
   schedule:
-    # UTC date parity below keeps a two-day cadence across month boundaries.
-    - cron: '37 9 * * *'
+    - cron: '0 2 * * 1'
   workflow_dispatch:
     inputs:
       preview:
         description: Build proposed changes without pushing them
         type: boolean
         default: true
+      maintenance:
+        description: Run the maintenance preview
+        type: boolean
+        default: false
+      replay:
+        description: Qualify the current pinned source of a package in preview
+        type: choice
+        options: [none, protun-openwrt, tailscale-rs]
+        default: none
       opencode_smoke:
         description: Verify the locked CLI and model on an isolated text fixture only
         type: boolean
@@ -19,12 +27,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ inputs.opencode_smoke && 'openwrt-opencode-smoke' || 'update-upstream-versions' }}
+  group: >-
+    ${{ github.event_name == 'workflow_dispatch' && inputs.preview
+        && format('openwrt-preview-{0}-{1}-{2}-{3}', github.ref, inputs.replay, inputs.maintenance, inputs.opencode_smoke)
+        || 'update-upstream-versions' }}
   cancel-in-progress: false
 
 jobs:
+  maintenance-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.preview && inputs.maintenance
+    uses: ./.github/workflows/maintenance.yml
+    secrets:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
   opencode-smoke:
-    if: github.event_name == 'workflow_dispatch' && inputs.preview && inputs.opencode_smoke
+    if: github.event_name == 'workflow_dispatch' && inputs.preview && inputs.opencode_smoke && !inputs.maintenance
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -39,79 +55,67 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: python .github/scripts/opencode_smoke.py
   update:
-    if: "!inputs.opencode_smoke && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.preview))"
+    if: "!inputs.maintenance && !inputs.opencode_smoke && (inputs.replay == '' || inputs.replay == 'none' || inputs.preview) && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.preview))"
     runs-on: ubuntu-latest
     outputs:
       patch_sha: ${{ steps.candidate.outputs.sha }}
       review_required: ${{ steps.candidate.outputs.review_required }}
     steps:
-      - name: Check two-day interval
-        id: interval
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          today=$(( $(date -u +%s) / 86400 ))
-          anchor=$(( $(date -u -d '2026-10-26' +%s) / 86400 ))
-          if [[ "$EVENT_NAME" == workflow_dispatch ]] || (( (today - anchor) % 2 == 0 )); then
-            echo 'due=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'due=false' >> "$GITHUB_OUTPUT"
-            echo 'Next upstream check is on the next two-day interval'
-          fi
-
       - name: Checkout the proposed baseline
-        if: steps.interval.outputs.due == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python for the version updater
-        if: steps.interval.outputs.due == 'true'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
       - name: Run updater tests
-        if: steps.interval.outputs.due == 'true'
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
       - name: Install the pinned Rust toolchain
-        if: steps.interval.outputs.due == 'true'
         id: rust
         shell: bash
         run: |
-          rust_version=$(sed -n 's/^      RUST_VERSION: //p' .github/workflows/build.yml)
+          rust_version=$(sed -n 's/^      RUST_VERSION: //p' .github/workflows/sdk-build.yml)
           if [[ ! $rust_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo 'Cannot read the pinned Rust version from build.yml' >&2
+            echo 'Cannot read the pinned Rust version from sdk-build.yml' >&2
             exit 1
           fi
           rustup toolchain install "$rust_version" --profile minimal --no-self-update
           echo "version=$rust_version" >> "$GITHUB_OUTPUT"
 
       - uses: ./.github/actions/setup-opencode
-        if: steps.interval.outputs.due == 'true'
 
       - name: Check upstream versions and prepare a candidate
-        if: steps.interval.outputs.due == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RUSTUP_TOOLCHAIN: ${{ steps.rust.outputs.version }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-        run: python3 .github/scripts/update-versions.py
+          REPLAY: ${{ inputs.replay }}
+        shell: bash
+        run: |
+          args=()
+          if [[ "$REPLAY" != '' && "$REPLAY" != none ]]; then
+            args=(--replay "$REPLAY")
+          fi
+          python3 .github/scripts/update-versions.py "${args[@]}"
 
       - name: Record the exact update for qualification
-        if: steps.interval.outputs.due == 'true'
         id: candidate
         shell: bash
         run: |
           git add -- 'package/*/Makefile' 'package/*/files/Cargo.lock' \
             package/protun-openwrt/files/openwrt-{client,config,cache,status}.rs \
-            .github/workflows/build.yml
+            package/tailscale-rs/example.c package/tailscale-rs/files/stage-header.py \
+            .github/workflows/sdk-build.yml
           if git diff --cached --quiet; then
             echo 'Upstream versions are already current'
             exit 0
           fi
           git diff --cached --check
+          python3 .github/scripts/check_repository.py
+          python3 .github/scripts/validate-candidate.py upstream
           if git diff --cached -- package/tailscale-rs/Makefile | grep '^+PKG_VERSION:=' >/dev/null; then
             echo 'review_required=true' >> "$GITHUB_OUTPUT"
             echo 'Review the Tailscale Rust release changes in a pull request using the proposed patch artifact.' >> "$GITHUB_STEP_SUMMARY"
@@ -126,19 +130,28 @@ jobs:
           path: ${{ runner.temp }}/upstream-update/update.patch
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.candidate.outputs.sha != ''
+        with:
+          name: upstream-release-review
+          path: ${{ runner.temp }}/*-release-review.md
+          if-no-files-found: ignore
+          retention-days: 14
 
   qualify:
     needs: update
     if: needs.update.outputs.patch_sha != ''
     permissions:
-      contents: write
-    uses: ./.github/workflows/build.yml
+      contents: read
+    uses: ./.github/workflows/sdk-build.yml
     with:
       update_patch_sha: ${{ needs.update.outputs.patch_sha }}
+      apk_artifact: qualified-upstream-apks
+      warm_rebuild: ${{ inputs.replay != '' && inputs.replay != 'none' }}
 
   publish:
     needs: [update, qualify]
-    if: github.ref == 'refs/heads/main' && needs.update.outputs.review_required != 'true' && !(github.event_name == 'workflow_dispatch' && inputs.preview)
+    if: needs.qualify.result == 'success' && needs.update.outputs.patch_sha != '' && github.ref == 'refs/heads/main' && needs.update.outputs.review_required != 'true' && !(github.event_name == 'workflow_dispatch' && inputs.preview)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -149,12 +162,23 @@ jobs:
         with:
           name: proposed-upstream-update
           path: ${{ runner.temp }}/upstream-update
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: qualified-upstream-apks
+          path: ${{ runner.temp }}/qualified-upstream
       - name: Publish the exact change that passed the OpenWrt SDK gate
         shell: bash
         env:
           PATCH_SHA: ${{ needs.update.outputs.patch_sha }}
         run: |
-          bash .github/scripts/apply-update.sh "$RUNNER_TEMP/upstream-update/update.patch" "$PATCH_SHA"
+          cd "$RUNNER_TEMP/qualified-upstream"
+          test "$(sed -n '1p' provenance.txt)" = "$GITHUB_SHA"
+          test "$(sed -n '2p' provenance.txt)" = "$PATCH_SHA"
+          diff <(tail -n +3 provenance.txt) <(sha256sum -- *.apk)
+          cd "$GITHUB_WORKSPACE"
+          git fetch --no-tags origin refs/heads/main
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          bash .github/scripts/apply-update.sh "$RUNNER_TEMP/upstream-update/update.patch" "$PATCH_SHA" "$GITHUB_SHA"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Update upstream versions'

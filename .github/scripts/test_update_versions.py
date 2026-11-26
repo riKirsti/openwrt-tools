@@ -143,6 +143,23 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.updated_source.call_args.args[1:3], (name, f"v{release}"))
         self.assertEqual(self.updated_source.call_args.args[5], "b" * 40)
 
+    def test_preview_replays_only_requested_package_at_its_pinned_revision(self):
+        for name in updater.PROJECTS:
+            with self.subTest(package=name):
+                path = self.root / "package" / name / "Makefile"
+                original = path.read_text(encoding="utf-8")
+                digest = updater.match_one(r"^PKG_HASH:=([a-f0-9]{64})$", original).group(1)
+                self.updated_source.return_value = (digest, b"replay lock\n", {})
+                other = next(item for item in updater.PROJECTS if item != name)
+                other_path = self.root / "package" / other / "Makefile"
+                other_before = other_path.read_bytes()
+                (path.parent / "files").mkdir(exist_ok=True)
+                updater.update(self.root, replay=name)
+                self.assertEqual(self.updated_source.call_args.args[5], self.commits[updater.PROJECTS[name]["repository"]])
+                self.assertEqual(other_path.read_bytes(), other_before)
+        self.latest_tag.assert_not_called()
+        self.latest_openwrt.assert_not_called()
+
     def test_retargeted_pinned_release_is_rejected(self):
         before = self.snapshot()
         for repo, revision in list(self.commits.items()):
@@ -166,6 +183,33 @@ class AdapterScopeTests(unittest.TestCase):
             agent.changes(baseline, {**baseline, source: b"changed"})
         with self.assertRaisesRegex(ValueError, "outside"):
             agent.changes(baseline, {source: b"upstream"})
+
+    def test_tailscale_adaptation_reads_pinned_context_but_preserves_recipe(self):
+        import adapt_protunnext as agent
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            release = root / "release"
+            release.mkdir()
+            (release / "CHANGELOG.md").write_text("New C option", encoding="utf-8")
+            (root / "AGENTS.md").write_text("Verify pinned claims", encoding="utf-8")
+            recipe = Path("package/tailscale-rs/Makefile")
+            for path in (*agent.TAILSCALE_EDITABLE, recipe):
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text("baseline", encoding="utf-8")
+            editable_path = Path("package/tailscale-rs/files/stage-header.py")
+
+            def suggest(key, prompt, workspace, editable):
+                self.assertIn("tailscale-rs", prompt)
+                self.assertEqual((workspace / "release/CHANGELOG.md").read_text(encoding="utf-8"), "New C option")
+                self.assertEqual((workspace / "AGENTS.md").read_text(encoding="utf-8"), "Verify pinned claims")
+                self.assertTrue((workspace / recipe).is_file())
+                self.assertNotIn(recipe.as_posix(), editable)
+                (workspace / editable_path).write_text("update", encoding="utf-8")
+
+            with patch.object(agent.opencode_ci, "run", side_effect=suggest):
+                changes = agent.adapt(root, release, "v1.2.3", "0" * 40, "fixture", package="tailscale-rs")
+            self.assertEqual(changes, {editable_path: b"update"})
 
 
 if __name__ == "__main__":

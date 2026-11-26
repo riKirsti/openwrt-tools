@@ -20,7 +20,7 @@ from adapt_protunnext import adapt
 
 
 VERSION = r"(\d+\.\d+\.\d+)"
-WORKFLOW = Path(".github/workflows/build.yml")
+WORKFLOW = Path(".github/workflows/sdk-build.yml")
 PROTUNNEXT = "riKirsti/ProtunNext"
 COMMIT = r"[0-9a-f]{40}"
 
@@ -154,6 +154,8 @@ def updated_source(root, name, tag, cargo, rust_version, revision, model_key="")
                     (source / client_source.name).write_bytes(edits[relative])
                 else:
                     shutil.copyfile(client_source, source / client_source.name)
+        else:
+            edits = adapt(root, source, tag, revision, model_key, package=name)
         build_source = (source / project["manifest"]).parent
         if name != "protun-openwrt":
             shutil.copyfile(root / "package" / name / "files/Cargo.lock", build_source / "Cargo.lock")
@@ -196,7 +198,7 @@ def updated_source(root, name, tag, cargo, rust_version, revision, model_key="")
     return digest, lock, edits
 
 
-def update(root, cargo="cargo", model_key=""):
+def update(root, cargo="cargo", model_key="", replay=""):
     root = root.resolve()
     workflow = (root / WORKFLOW).read_text(encoding="utf-8")
     recipes = {path.parent.name for path in root.glob("package/*/Makefile")}
@@ -210,7 +212,7 @@ def update(root, cargo="cargo", model_key=""):
     sdk = match_one(r"^\s+SDK_ARCH: ([a-z0-9_-]+)-" + VERSION + "$", workflow)
     architecture, current_openwrt = sdk.group(1), sdk.group(2)
     rust_version = match_one(r"^\s+RUST_VERSION: " + VERSION + "$", workflow).group(1)
-    new_openwrt = latest_openwrt(current_openwrt)
+    new_openwrt = current_openwrt if replay else latest_openwrt(current_openwrt)
     sdk_changed = version(new_openwrt) > version(current_openwrt)
     if sdk_changed and not sdk_available(architecture, new_openwrt):
         print(f"OpenWrt {new_openwrt} SDK is not published yet; retaining {current_openwrt}")
@@ -218,6 +220,8 @@ def update(root, cargo="cargo", model_key=""):
     changes = {}
     summary = []
     for name in sorted(recipes):
+        if replay and name != replay:
+            continue
         make_path = Path("package") / name / "Makefile"
         makefile = (root / make_path).read_text(encoding="utf-8")
         original = makefile
@@ -227,13 +231,13 @@ def update(root, cargo="cargo", model_key=""):
         revision = int(match_one(r"^PKG_RELEASE:=(\d+)$", makefile).group(1))
         project = PROJECTS[name]
         match_one(r"^PKG_HASH:=[0-9a-f]{64}$", makefile)
-        tag = latest_tag(project["repository"])
-        release = tag.removeprefix("v")
         pinned = match_one(r"^PKG_SOURCE_COMMIT:=(" + COMMIT + ")$", makefile).group(1)
-        resolved = release_commit(project["repository"], tag)
+        tag = f"v{current}" if replay else latest_tag(project["repository"])
+        release = tag.removeprefix("v")
+        resolved = pinned if replay else release_commit(project["repository"], tag)
         if version(release) == version(current) and resolved != pinned:
             raise ValueError(f"Published {project['repository']} tag {tag} changed commit")
-        if version(release) > version(current):
+        if replay or version(release) > version(current):
             expected_url = f"https://codeload.github.com/{project['repository']}/tar.gz/{resolved}"
             source_url = match_one(r"^PKG_SOURCE_URL:=(https://[^\s?]+)$", makefile).group(1)
             source_file = match_one(r"^PKG_SOURCE_URL_FILE:=(\S+)$", makefile).group(1)
@@ -241,11 +245,14 @@ def update(root, cargo="cargo", model_key=""):
             if configured_url != expected_url:
                 raise ValueError(f"Release tag does not match {name}'s source URL: {tag}")
             digest, lock, edits = updated_source(root, name, tag, cargo, rust_version, resolved, model_key)
+            if replay and digest != match_one(r"^PKG_HASH:=([0-9a-f]{64})$", makefile).group(1):
+                raise ValueError(f"Pinned replay source checksum changed: {name}")
             changes.update(edits)
             makefile = makefile.replace(f"PKG_SOURCE_COMMIT:={pinned}", f"PKG_SOURCE_COMMIT:={resolved}")
             makefile = re.sub(r"^PKG_VERSION:=" + VERSION + "$", "PKG_VERSION:=" + release, makefile, flags=re.MULTILINE)
             makefile = re.sub(r"^PKG_HASH:=[0-9a-f]{64}$", "PKG_HASH:=" + digest, makefile, flags=re.MULTILINE)
-            makefile = re.sub(r"^PKG_RELEASE:=\d+$", "PKG_RELEASE:=1", makefile, flags=re.MULTILINE)
+            next_revision = revision + 1 if replay else 1
+            makefile = re.sub(r"^PKG_RELEASE:=\d+$", f"PKG_RELEASE:={next_revision}", makefile, flags=re.MULTILINE)
             changes[Path("package") / name / "files/Cargo.lock"] = lock
             summary.append(f"{name} {current} -> {release}")
         elif sdk_changed:
@@ -268,5 +275,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--cargo", default="cargo")
+    parser.add_argument("--replay", choices=sorted(PROJECTS), default="")
     args = parser.parse_args()
-    update(args.root, args.cargo, os.environ.pop("OPENCODE_API_KEY", ""))
+    update(args.root, args.cargo, os.environ.pop("OPENCODE_API_KEY", ""), args.replay)

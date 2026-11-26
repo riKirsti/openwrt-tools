@@ -2,11 +2,6 @@ name: Build OpenWrt tools APKs
 
 on:
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      update_patch_sha:
-        type: string
-        required: true
   pull_request:
     branches:
       - main
@@ -16,6 +11,7 @@ on:
       - proton-stealth-integration
     paths:
       - '.github/workflows/build.yml'
+      - '.github/workflows/sdk-build.yml'
       - '.github/scripts/**'
       - 'package/**'
       - '.gitattributes'
@@ -24,126 +20,21 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-openwrt-${{ github.workflow }}-${{ github.ref }}-${{ inputs.update_patch_sha || 'checkout' }}
+  group: build-openwrt-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    # The integration branch already has a push build; avoid an identical second build.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'proton-stealth-integration' || github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      SDK_ARCH: aarch64_cortex-a53-25.12.6
-      PACKAGES_COMMIT: 093d551675b1119a06ef224d419905e8d6b2af1a
-      RUST_VERSION: 1.100.0
-      TOOLS_BUILD_MODE: runtime
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.update_patch_sha != ''
-        with:
-          name: proposed-upstream-update
-          path: ${{ runner.temp }}/upstream-update
-      - name: Apply the exact proposed update
-        if: inputs.update_patch_sha != ''
-        env:
-          PATCH_SHA: ${{ inputs.update_patch_sha }}
-        run: |
-          bash .github/scripts/apply-update.sh "$RUNNER_TEMP/upstream-update/update.patch" "$PATCH_SHA"
-          sdk=$(sed -n 's/^      SDK_ARCH: //p' .github/workflows/build.yml)
-          [[ "$sdk" =~ ^[a-z0-9_-]+-[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          echo "SDK_ARCH=$sdk" >> "$GITHUB_ENV"
-
-      - name: Check repository privacy and documentation
-        run: python3 .github/scripts/check_repository.py
-
-      - name: Install prebuilt Rust and the ARM64 musl standard library
-        id: rust
-        shell: bash
-        run: |
-          started=$SECONDS
-          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update
-          rustup target add aarch64-unknown-linux-musl --toolchain "$RUST_VERSION"
-          toolchain_dir=$(rustc +"$RUST_VERSION" --print sysroot)
-          echo "toolchain-dir=$toolchain_dir" >> "$GITHUB_OUTPUT"
-          echo "Rust setup: $((SECONDS - started))s" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Resolve the OpenWrt SDK image
-        id: sdk
-        shell: bash
-        run: |
-          started=$SECONDS
-          sdk_image="ghcr.io/openwrt/sdk:$SDK_ARCH"
-          docker pull "$sdk_image"
-          image_id=$(docker image inspect --format '{{.Id}}' "$sdk_image")
-          echo "image-id=${image_id#sha256:}" >> "$GITHUB_OUTPUT"
-          image_ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$sdk_image")
-          echo "image-ref=$image_ref" >> "$GITHUB_OUTPUT"
-          echo "SDK image setup: $((SECONDS - started))s" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Restore SDK downloads and Rust build files
-        id: cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/tools-cache/downloads
-            ${{ runner.temp }}/tools-cache/cargo-target
-          key: tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.SDK_ARCH }}-${{ steps.sdk.outputs.image-id }}-${{ env.PACKAGES_COMMIT }}-${{ env.RUST_VERSION }}-mode${{ env.TOOLS_BUILD_MODE }}-${{ hashFiles('package/**', '.github/scripts/build-sdk.sh') }}
-          restore-keys: |
-            tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.SDK_ARCH }}-${{ steps.sdk.outputs.image-id }}-${{ env.PACKAGES_COMMIT }}-${{ env.RUST_VERSION }}-mode${{ env.TOOLS_BUILD_MODE }}-
-
-      - name: Enable ARM64 library load checks
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          platforms: arm64
-
-      - name: Build and verify libraries and the protocol client with the OpenWrt SDK
-        id: build
-        shell: bash
-        env:
-          RESOLVED_SDK_IMAGE: ${{ steps.sdk.outputs.image-ref }}
-          RUST_TOOLCHAIN_DIR: ${{ steps.rust.outputs.toolchain-dir }}
-        run: |
-          echo "Compilation cache exact hit: ${{ steps.cache.outputs.cache-hit == 'true' }}" >> "$GITHUB_STEP_SUMMARY"
-          bash .github/scripts/run-sdk.sh
-
-      - name: Upload verified APKs for review and device testing
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: openwrt-tools-${{ github.sha }}
-          path: ${{ runner.temp }}/tools-apk/*.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Restore cache ownership for the runner
-        if: always()
-        shell: bash
-        run: |
-          for directory in "$RUNNER_TEMP/tools-cache" "$RUNNER_TEMP/tools-apk"; do
-            if [ -d "$directory" ]; then
-              sudo chown -R "$(id -u):$(id -g)" "$directory"
-            fi
-          done
-
-      - name: Save verified build cache before publishing
-        if: success() && inputs.update_patch_sha == '' && steps.build.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/tools-cache/downloads
-            ${{ runner.temp }}/tools-cache/cargo-target
-          key: ${{ steps.cache.outputs.cache-primary-key }}
+    uses: ./.github/workflows/sdk-build.yml
+    with:
+      apk_artifact: openwrt-tools-${{ github.sha }}
 
   publish:
     needs: build
-    if: inputs.update_patch_sha == '' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/proton-stealth-integration') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/proton-stealth-integration') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -165,4 +56,9 @@ jobs:
           APK_DIR: ${{ runner.temp }}/tools-apk
           PUBLISH_BRANCH: ${{ github.ref_name }}
         run: |
+          cd "$APK_DIR"
+          test "$(sed -n '1p' provenance.txt)" = "$GITHUB_SHA"
+          test -z "$(sed -n '2p' provenance.txt)"
+          diff <(tail -n +3 provenance.txt) <(sha256sum -- *.apk)
+          cd "$GITHUB_WORKSPACE"
           bash .github/scripts/publish-apks.sh

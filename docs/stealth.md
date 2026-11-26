@@ -5,8 +5,8 @@ transports, automatic candidate selection, multiple servers, and integrated
 Local Agent settings. Stealth is the default selection. The APK installs one
 executable plus the OpenWrt service and configuration.
 
-The service is disabled by default. No installation script rewrites network,
-DNS, firewall, PBR, or ZeroTier settings. Existing ZeroTier connections retain their role and configuration.
+The service is disabled by default. Installation leaves network, DNS, firewall,
+and policy-based routing settings in place.
 
 ## Protocol selection
 
@@ -153,18 +153,17 @@ for reachable WAN routes under every policy rule; inspect existing endpoint
 routes and marks rather than adding global rules blindly.
 
 `tun_name` must be unused. The client exclusively creates a nonpersistent TUN
-device and cannot attach to an existing WireGuard/ZeroTier device. netifd owns
-its addresses, MTU, link state and routing. Replace the existing Proton logical
+device. Choose a name that differs from every existing interface. netifd owns
+its addresses, MTU, link state, and routing. Replace the existing Proton logical
 interface's WireGuard backend with this TUN using netifd's `static` protocol;
 preserve the logical interface name and its intended firewall/PBR references.
 Use the actual tunnel addresses and MTU from your Proton configuration.
 
 WireGuard's `allowed_ips`/`route_allowed_ips` do not apply to a `static` interface.
-Reproduce the existing effective routes explicitly, including the existing
-ZeroTier/home exceptions and IPv6 policy. Preserve DNS, forwarding/NAT and
+Reproduce the existing effective routes explicitly, including routes to other
+networks and the IPv6 policy. Preserve DNS, forwarding/NAT and
 kill-switch policy. This executable does not install its own firewall kill
 switch; verify the existing policy covers the new TUN and its disappearance.
-No home-router or ZeroTier controller changes are part of this migration.
 
 After the probe and network-policy checks succeed:
 
@@ -178,8 +177,7 @@ logread -e protun
 
 Supervision uses delayed, bounded respawns. Uplink changes restart the process;
 update the JSON if the physical device name changes. Rollback means stopping
-and disabling this service and restoring the prior Proton/WireGuard interface,
-without modifying ZeroTier or the remote router.
+and disabling this service and restoring the prior Proton/WireGuard interface.
 
 ## Verification and limits
 
@@ -189,7 +187,7 @@ session files. `--probe` creates no TUN device and changes no network policy. It
 attempts a real connection and reports the actual selected protocol; in Local
 Agent mode, success requires both the VPN and Local Agent connection. It may
 consume a fork or refresh/write cached credentials. It does not prove LAN
-forwarding, DNS, external port forwarding or ZeroTier reachability.
+forwarding, DNS, external port forwarding, or reachability through other interfaces.
 
 CI builds and runs ARM64 startup/configuration checks plus unit tests for all
 protocol selections, missing ports, Local Agent setting mapping, multiple-peer
@@ -197,8 +195,8 @@ validation, private cache storage and one-use fork consumption. These are
 offline tests, not authenticated Proton network tests.
 
 On the router, verify the intended exit IP from a LAN client, DNS and IPv6,
-bidirectional home access through ZeroTier, the ZeroTier transport path, and
-behavior when the client stops. Test WAN changes, reboot, MTU-sensitive traffic
+reachability to any other networks you route through the device, and behavior
+when the client stops. Test WAN changes, reboot, MTU-sensitive traffic
 and extended operation. Compare throughput, CPU and memory against WireGuard;
 userspace operation does not imply hardware offload or a speed improvement.
 

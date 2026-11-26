@@ -13,8 +13,7 @@ It builds the managed connection engine from a stable ProtunNext release,
 pinned to the release commit and source archive SHA-256.
 Stealth remains the default. The OpenWrt service is disabled until configured.
 See [Stealth setup and verification](docs/stealth.md). Installing the package
-does not migrate a WireGuard interface or change ZeroTier, routing, DNS or firewall
-configuration.
+leaves existing network interfaces, routing, DNS, and firewall rules in place.
 
 ## Tailscale Rust library
 

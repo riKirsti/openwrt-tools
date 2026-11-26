@@ -223,6 +223,12 @@ verify_tailscale_package() {
         /tmp/tools-load-test "$payload/usr/lib/libtailscalers.so" ts_init
     "$loader" --library-path "$payload/usr/lib:$sdk_library_path" \
         "$payload/smoke"
+    if [[ -f /baseline-tailscale-smoke.c ]]; then
+        "$compiler" -std=c11 -Wall -Wextra -Werror -O2 \
+            -I"$payload/usr/include" /baseline-tailscale-smoke.c \
+            -L"$STAGING_DIR/usr/lib" -ltailscalers -o "$payload/baseline-smoke"
+        "$loader" --library-path "$payload/usr/lib:$sdk_library_path" "$payload/baseline-smoke"
+    fi
     echo 'Tailscale Rust APK header and C smoke test passed'
 }
 
@@ -242,14 +248,8 @@ export_apks() {
 }
 
 verify_client() {
-    local -a clients
-    mapfile -t clients < <(find build_dir -type f -path '*/ipkg-*/protun-openwrt/usr/sbin/protun-openwrt')
-    if (( ${#clients[@]} != 1 )); then
-        echo 'Expected one staged protocol client' >&2
-        exit 1
-    fi
-    local client fixture key
-    client="$(realpath "${clients[0]}")"
+    local client="$1/usr/sbin/protun-openwrt" fixture key
+    test -x "$client"
     if find "${client%/usr/sbin/protun-openwrt}" -type f -name libprotun.so | grep -q .; then
         echo 'Client-only package unexpectedly contains libprotun.so' >&2
         exit 1
@@ -322,18 +322,26 @@ PY
 }
 
 verify_integration() {
-    local -a roots
-    local root script
-    mapfile -t roots < <(find build_dir -type d -path '*/ipkg-*/protun-openwrt')
-    if (( ${#roots[@]} != 1 )); then
-        echo 'Expected one staged protocol client package' >&2; exit 1
-    fi
-    root=${roots[0]}
+    local root=$1 script
     for script in usr/lib/exitnode/backend.sh usr/libexec/proton-tunnel usr/libexec/proton-stealth usr/libexec/proton-transport-metadata etc/init.d/proton-stealth; do
         test -s "$root/$script"
         bash -n "$root/$script"
     done
     echo 'Integration shell syntax checked; no router policy applied'
+}
+
+verify_protun_package() {
+    local -a apks
+    mapfile -t apks < <(find bin/packages -type f -name 'protun-openwrt-*.apk')
+    if (( ${#apks[@]} != 1 )); then
+        echo 'Expected one Proton OpenWrt APK' >&2
+        return 1
+    fi
+    local payload
+    payload="$(mktemp -d)"
+    staging_dir/host/bin/apk extract --allow-untrusted --no-chown --destination "$payload" "${apks[0]}"
+    verify_client "$payload"
+    verify_integration "$payload"
 }
 
 cd /builder
@@ -342,6 +350,5 @@ run_phase 'SDK feeds and configuration' configure_sdk
 run_phase 'Compile and package' compile_packages
 run_phase 'Locate ARM64 verification tools' configure_verification
 run_phase 'ARM64 library checks' verify_libraries
-run_phase 'ARM64 protocol client checks' verify_client
-run_phase 'Controller integration checks' verify_integration
+run_phase 'Packaged ARM64 client and controller checks' verify_protun_package
 run_phase 'Export APKs' export_apks
