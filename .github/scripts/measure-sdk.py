@@ -29,13 +29,10 @@ def measure(work, scratch, script):
     scratch.mkdir()
     env = {**os.environ, "GITHUB_WORKSPACE": str(work), "RUNNER_TEMP": str(scratch)}
     result = {}
-    try:
-        for metric in ("cold_build_seconds", "warm_build_seconds"):
-            start = time.monotonic()
-            subprocess.run(["bash", str(script)], cwd=work, env=env, check=True)
-            result[metric] = time.monotonic() - start
-    finally:
-        subprocess.run(["sudo", "chown", "-R", f"{os.getuid()}:{os.getgid()}", str(scratch)], check=True)
+    for metric in ("cold_build_seconds", "warm_build_seconds"):
+        start = time.monotonic()
+        subprocess.run(["bash", str(script)], cwd=work, env=env, check=True)
+        result[metric] = time.monotonic() - start
     packages = {}
     for path in (scratch / "tools-apk").glob("*.apk"):
         for package in PACKAGES:

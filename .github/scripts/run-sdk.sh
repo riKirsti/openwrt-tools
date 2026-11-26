@@ -9,6 +9,14 @@ echo "Build jobs: $BUILD_JOBS; build mode: $TOOLS_BUILD_MODE" >> "$GITHUB_STEP_S
 cache_dir="$RUNNER_TEMP/tools-cache"
 output_dir="$RUNNER_TEMP/tools-apk"
 mkdir -p "$cache_dir/downloads" "$cache_dir/cargo-target" "$output_dir"
+download=
+restore_runner_files() {
+  if [[ -n "$download" ]]; then
+    rm -f -- "$download"
+  fi
+  sudo chown -R "$(id -u):$(id -g)" "$cache_dir" "$output_dir"
+}
+trap restore_runner_files EXIT
 recipe=package/protun-openwrt/Makefile
 version=$(sed -n 's/^PKG_VERSION:=//p' "$recipe")
 revision=$(sed -n 's/^PKG_SOURCE_COMMIT:=//p' "$recipe")
@@ -17,12 +25,11 @@ source_hash=$(sed -n 's/^PKG_HASH:=//p' "$recipe")
 archive="$cache_dir/downloads/protunnext-$version.tar.gz"
 if ! echo "$source_hash  $archive" | sha256sum -c --status; then
   download=$(mktemp "$cache_dir/downloads/.protunnext.XXXXXX")
-  trap 'rm -f -- "$download"' EXIT
   curl --fail --silent --show-error --location --proto '=https' --retry 3 --max-time 120 \
     "https://codeload.github.com/riKirsti/ProtunNext/tar.gz/$revision" --output "$download"
   echo "$source_hash  $download" | sha256sum -c -
   mv -- "$download" "$archive"
-  trap - EXIT
+  download=
 fi
 sudo chown -R 1000:1000 "$cache_dir" "$output_dir"
 smoke_mount=()

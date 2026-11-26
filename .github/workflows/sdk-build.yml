@@ -125,16 +125,6 @@ jobs:
           RUST_TOOLCHAIN_DIR: ${{ steps.rust.outputs.toolchain-dir }}
         run: bash .github/scripts/run-sdk.sh
 
-      - name: Restore cache ownership for the runner
-        if: always()
-        shell: bash
-        run: |
-          for directory in "$RUNNER_TEMP/tools-cache" "$RUNNER_TEMP/tools-apk"; do
-            if [ -d "$directory" ]; then
-              sudo chown -R "$(id -u):$(id -g)" "$directory"
-            fi
-          done
-
       - name: Compare candidate against the baseline
         if: inputs.metric != ''
         env:
