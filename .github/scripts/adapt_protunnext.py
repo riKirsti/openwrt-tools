@@ -38,7 +38,7 @@ def changes(before, after, editable=EDITABLE):
 
 TAILSCALE_EDITABLE = {Path("package/tailscale-rs") / name
                      for name in ("example.c", "files/stage-header.py")}
-TAILSCALE_CONTEXT = tuple(map(Path, ("Cargo.toml", "README.md", "crates/bindings/ts_ffi")))
+TAILSCALE_CONTEXT = tuple(map(Path, ("Cargo.toml", "README.md", "CHANGELOG.md", "crates/bindings/ts_ffi")))
 
 
 def adapt(package_root, release, tag, revision, key, package="protun-openwrt"):
@@ -48,7 +48,8 @@ def adapt(package_root, release, tag, revision, key, package="protun-openwrt"):
     if package == "tailscale-rs":
         editable, context = TAILSCALE_EDITABLE, TAILSCALE_CONTEXT
         objective = (
-            "Review upstream feature, configuration and C API changes affecting OpenWrt. "
+            "Review upstream feature, configuration and C API changes affecting OpenWrt "
+            "since the version and revision in the existing package Makefile. "
             "Preserve the installed library, generated header and C interface. "
             "Adapt header staging or the C example only where needed. "
             "Report changes requiring a different recipe or upstream patch for maintainer review."
@@ -65,6 +66,9 @@ def adapt(package_root, release, tag, revision, key, package="protun-openwrt"):
         for path in sorted(editable):
             (work / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(package_root / path, work / path)
+        if package == "tailscale-rs":
+            recipe = Path("package/tailscale-rs/Makefile")
+            shutil.copyfile(package_root / recipe, work / recipe)
         guidance = package_root / "AGENTS.md"
         if guidance.exists():
             shutil.copyfile(guidance, work / guidance.name)
