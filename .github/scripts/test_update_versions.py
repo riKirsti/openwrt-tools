@@ -143,6 +143,23 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.updated_source.call_args.args[1:3], (name, f"v{release}"))
         self.assertEqual(self.updated_source.call_args.args[5], "b" * 40)
 
+    def test_preview_replays_only_requested_package_at_its_pinned_revision(self):
+        for name in updater.PROJECTS:
+            with self.subTest(package=name):
+                path = self.root / "package" / name / "Makefile"
+                original = path.read_text(encoding="utf-8")
+                digest = updater.match_one(r"^PKG_HASH:=([a-f0-9]{64})$", original).group(1)
+                self.updated_source.return_value = (digest, b"replay lock\n", {})
+                other = next(item for item in updater.PROJECTS if item != name)
+                other_path = self.root / "package" / other / "Makefile"
+                other_before = other_path.read_bytes()
+                (path.parent / "files").mkdir(exist_ok=True)
+                updater.update(self.root, replay=name)
+                self.assertEqual(self.updated_source.call_args.args[5], self.commits[updater.PROJECTS[name]["repository"]])
+                self.assertEqual(other_path.read_bytes(), other_before)
+        self.latest_tag.assert_not_called()
+        self.latest_openwrt.assert_not_called()
+
     def test_retargeted_pinned_release_is_rejected(self):
         before = self.snapshot()
         for repo, revision in list(self.commits.items()):

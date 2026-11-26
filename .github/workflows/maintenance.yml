@@ -1,0 +1,23 @@
+name: Preview OpenWrt maintenance
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      OPENCODE_API_KEY:
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: openwrt-maintenance-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  stage:
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [performance, refactor, cleanup]
+    uses: ./.github/workflows/maintenance-stage.yml
+    with:
+      stage: ${{ matrix.stage }}
+    secrets:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
