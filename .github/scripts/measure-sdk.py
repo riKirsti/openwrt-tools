@@ -25,6 +25,12 @@ def decision(metric, scope, pairs):
     return "no repeatable improvement"
 
 
+def worth_repeating(metric, scope, base, candidate):
+    if metric == "apk_bytes":
+        return candidate[metric][scope] < base[metric][scope]
+    return candidate[metric] < base[metric]
+
+
 def measure(work, scratch, script):
     scratch.mkdir()
     env = {**os.environ, "GITHUB_WORKSPACE": str(work), "RUNNER_TEMP": str(scratch)}
@@ -64,11 +70,16 @@ def main():
                     work = baseline if arm == "base" else candidate
                     samples[arm] = measure(work, parent / f"{round_number}-{arm}", script)
                 pairs.append((samples["base"], samples["candidate"]))
+                if not worth_repeating(metric, scope, *pairs[0]):
+                    break
         finally:
             subprocess.run(["git", "worktree", "remove", "--force", str(baseline)], check=True)
-    outcomes = {name: decision("apk_bytes", name, pairs) for name in PACKAGES}
-    outcomes.update({name: decision(name, "feed", pairs) for name in METRICS - {"apk_bytes"}})
-    verdict = decision(metric, scope, pairs)
+    outcomes = {}
+    if len(pairs) == 2:
+        outcomes = {name: decision("apk_bytes", name, pairs) for name in PACKAGES}
+        outcomes.update({name: decision(name, "feed", pairs) for name in METRICS - {"apk_bytes"}})
+    verdict = ("no improvement in initial pair" if len(pairs) == 1
+               else decision(metric, scope, pairs))
     if verdict == "improvement observed" and "regression observed" in outcomes.values():
         verdict = "regression observed"
     evidence = {"metric": metric, "scope": scope, "pairs": pairs, "outcomes": outcomes, "decision": verdict}

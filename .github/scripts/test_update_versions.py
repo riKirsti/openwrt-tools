@@ -160,6 +160,42 @@ class UpdateTests(unittest.TestCase):
         self.latest_tag.assert_not_called()
         self.latest_openwrt.assert_not_called()
 
+    def test_independent_lanes_qualify_simultaneous_releases(self):
+        for name, project in updater.PROJECTS.items():
+            repo = project["repository"]
+            major, minor, micro = updater.version(self.tags[repo].removeprefix("v"))
+            self.tags[repo] = f"v{major}.{minor}.{micro + 1}"
+            self.commits[repo] = "b" * 40
+            (self.root / "package" / name / "files").mkdir()
+        before = self.snapshot()
+        standard = updater.update(self.root, lane="standard")
+        self.assertTrue(standard[0].startswith("protun-openwrt "))
+        self.assertEqual(self.snapshot()[Path("package/tailscale-rs/Makefile")],
+                         before[Path("package/tailscale-rs/Makefile")])
+        self.updated_source.reset_mock()
+        tailscale = updater.update(self.root, lane="tailscale")
+        self.assertTrue(tailscale[0].startswith("tailscale-rs "))
+        self.updated_source.assert_called_once()
+        self.assertEqual(self.updated_source.call_args.args[1], "tailscale-rs")
+
+    def test_lock_refresh_keeps_source_pin_and_increments_recipe_only_on_change(self):
+        package = self.root / "package/tailscale-rs"
+        lock = package / "files/Cargo.lock"
+        lock.parent.mkdir()
+        lock.write_bytes(b"baseline\n")
+        recipe = package / "Makefile"
+        original = recipe.read_text(encoding="utf-8")
+        updates = [("rustls@0.23.45", "0.23.46")]
+        updater.refresh_tailscale_lock(self.root, "cargo", updates)
+        digest = updater.match_one(r"^PKG_HASH:=([a-f0-9]{64})$", original).group(1)
+        self.assertEqual(self.updated_source.call_args.kwargs,
+                         {"lock_updates": updates, "expected_digest": digest})
+        number = updater.match_one(r"^PKG_RELEASE:=(\d+)$", original).group(1)
+        expected = original.replace(f"PKG_RELEASE:={number}\n", f"PKG_RELEASE:={int(number) + 1}\n")
+        self.assertEqual(recipe.read_text(encoding="utf-8"), expected)
+        updater.refresh_tailscale_lock(self.root, "cargo", updates)
+        self.assertEqual(recipe.read_text(encoding="utf-8"), expected)
+
     def test_retargeted_pinned_release_is_rejected(self):
         before = self.snapshot()
         for repo, revision in list(self.commits.items()):

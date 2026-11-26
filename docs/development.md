@@ -23,6 +23,8 @@ the OpenWrt SDK build and APK tests before the workflow pushes it to `main`.
 A source or compiler incompatibility stops the update for review.
 
 New Tailscale Rust releases are pinned to their release commit and source hash.
+The Tailscale candidate is prepared and qualified separately from Proton and SDK
+updates, so a Tailscale release review does not hold up the other lane.
 The updater qualifies the exact candidate and leaves it as a patch artifact for
 a pull request. Review the upstream changelog and C API, update the package documentation
 when the exposed features change, and run the SDK checks on the PR.
@@ -37,6 +39,22 @@ labeled **Verify the locked CLI and model on an isolated text fixture only**.
 
 Run updater regression tests with
 `python3 -m unittest discover -s .github/scripts -p 'test_*.py'`.
+
+The branch ruleset requires the ARM64 SDK check. For automated publication,
+the workflow attaches the same check to the exact commit derived from qualified
+artifacts before pushing it. Enable the ruleset from
+[`.github/main-ruleset.json`](../.github/main-ruleset.json) after the updated
+publishing workflows are on the default branch.
+
+## Refreshing a pinned dependency
+
+The Tailscale Cargo workspace lives in the pinned source archive. To update a
+dependency without changing the upstream release, use the pinned Rust toolchain
+and run the updater with `--refresh-tailscale-lock crate@old-version=new-version`.
+Repeat the option for multiple dependencies. The command verifies the source
+archive, resolves the lockfile in the real workspace, checks the ARM64 dependency
+graph, and increments the package revision when the lockfile changes. Review
+the diff and verify both APKs in the SDK build.
 
 ## Maintenance preview
 

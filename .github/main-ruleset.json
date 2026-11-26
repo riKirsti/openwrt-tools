@@ -1,0 +1,28 @@
+{
+  "name": "Require the OpenWrt SDK check on main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/heads/main"
+      ],
+      "exclude": []
+    }
+  },
+  "bypass_actors": [],
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          {
+            "context": "build / build",
+            "integration_id": 15368
+          }
+        ]
+      }
+    }
+  ]
+}

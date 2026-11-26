@@ -123,12 +123,15 @@ def manifest_version(source, path):
     return value
 
 
-def updated_source(root, name, tag, cargo, rust_version, revision, model_key=""):
+def updated_source(root, name, tag, cargo, rust_version, revision, model_key="", *,
+                   lock_updates=(), expected_digest=None):
     project = PROJECTS[name]
     release = tag.removeprefix("v")
     url = f"https://codeload.github.com/{project['repository']}/tar.gz/{revision}"
     archive = fetch(url)
     digest = hashlib.sha256(archive).hexdigest()
+    if expected_digest and digest != expected_digest:
+        raise ValueError(f"Pinned source checksum changed: {name}")
     with tempfile.TemporaryDirectory(prefix=f"{name}-update-") as temporary:
         work = Path(temporary)
         with tarfile.open(fileobj=io.BytesIO(archive)) as source_tar:
@@ -160,7 +163,12 @@ def updated_source(root, name, tag, cargo, rust_version, revision, model_key="")
         if name != "protun-openwrt":
             shutil.copyfile(root / "package" / name / "files/Cargo.lock", build_source / "Cargo.lock")
         # Retain existing dependencies wherever the new manifest permits them.
-        subprocess.run([cargo, "update", "--workspace"], cwd=build_source, check=True)
+        if lock_updates:
+            for dependency, precise in lock_updates:
+                subprocess.run([cargo, "update", "-p", dependency, "--precise", precise],
+                               cwd=build_source, check=True)
+        else:
+            subprocess.run([cargo, "update", "--workspace"], cwd=build_source, check=True)
         features = ["--features", ",".join(project["features"])] if project["features"] else []
         if name == "protun-openwrt":
             features.insert(0, "--no-default-features")
@@ -198,7 +206,7 @@ def updated_source(root, name, tag, cargo, rust_version, revision, model_key="")
     return digest, lock, edits
 
 
-def update(root, cargo="cargo", model_key="", replay=""):
+def update(root, cargo="cargo", model_key="", replay="", lane=""):
     root = root.resolve()
     workflow = (root / WORKFLOW).read_text(encoding="utf-8")
     recipes = {path.parent.name for path in root.glob("package/*/Makefile")}
@@ -212,7 +220,7 @@ def update(root, cargo="cargo", model_key="", replay=""):
     sdk = match_one(r"^\s+SDK_ARCH: ([a-z0-9_-]+)-" + VERSION + "$", workflow)
     architecture, current_openwrt = sdk.group(1), sdk.group(2)
     rust_version = match_one(r"^\s+RUST_VERSION: " + VERSION + "$", workflow).group(1)
-    new_openwrt = current_openwrt if replay else latest_openwrt(current_openwrt)
+    new_openwrt = current_openwrt if replay or lane == "tailscale" else latest_openwrt(current_openwrt)
     sdk_changed = version(new_openwrt) > version(current_openwrt)
     if sdk_changed and not sdk_available(architecture, new_openwrt):
         print(f"OpenWrt {new_openwrt} SDK is not published yet; retaining {current_openwrt}")
@@ -232,9 +240,10 @@ def update(root, cargo="cargo", model_key="", replay=""):
         project = PROJECTS[name]
         match_one(r"^PKG_HASH:=[0-9a-f]{64}$", makefile)
         pinned = match_one(r"^PKG_SOURCE_COMMIT:=(" + COMMIT + ")$", makefile).group(1)
-        tag = f"v{current}" if replay else latest_tag(project["repository"])
+        update_package = not lane or (lane == "tailscale") == (name == "tailscale-rs")
+        tag = latest_tag(project["repository"]) if update_package and not replay else f"v{current}"
         release = tag.removeprefix("v")
-        resolved = pinned if replay else release_commit(project["repository"], tag)
+        resolved = release_commit(project["repository"], tag) if update_package and not replay else pinned
         if version(release) == version(current) and resolved != pinned:
             raise ValueError(f"Published {project['repository']} tag {tag} changed commit")
         if replay or version(release) > version(current):
@@ -271,10 +280,44 @@ def update(root, cargo="cargo", model_key="", replay=""):
     return summary
 
 
+def refresh_tailscale_lock(root, cargo, dependencies):
+    package = "tailscale-rs"
+    recipe = root / "package" / package / "Makefile"
+    text = recipe.read_text(encoding="utf-8")
+    release = match_one(r"^PKG_VERSION:=" + VERSION + "$", text).group(1)
+    revision = match_one(r"^PKG_SOURCE_COMMIT:=(" + COMMIT + ")$", text).group(1)
+    digest = match_one(r"^PKG_HASH:=([0-9a-f]{64})$", text).group(1)
+    workflow = (root / WORKFLOW).read_text(encoding="utf-8")
+    rust = match_one(r"^\s+RUST_VERSION: " + VERSION + "$", workflow).group(1)
+    _, updated, _ = updated_source(root, package, f"v{release}", cargo, rust, revision,
+                                  lock_updates=dependencies, expected_digest=digest)
+    lock = recipe.parent / "files/Cargo.lock"
+    if lock.read_bytes().replace(b"\r\n", b"\n") == updated.replace(b"\r\n", b"\n"):
+        return
+    number = match_one(r"^PKG_RELEASE:=(\d+)$", text).group(1)
+    lock.write_bytes(updated.replace(b"\r\n", b"\n"))
+    recipe.write_text(text.replace(f"PKG_RELEASE:={number}\n", f"PKG_RELEASE:={int(number) + 1}\n"),
+                      encoding="utf-8", newline="\n")
+
+
+def lock_update(value):
+    match = re.fullmatch(r"([a-zA-Z0-9_-]+(?:@\d+\.\d+\.\d+)?)=(\d+\.\d+\.\d+)", value)
+    if not match:
+        raise argparse.ArgumentTypeError("use dependency[@old-version]=new-version")
+    return match.groups()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--cargo", default="cargo")
     parser.add_argument("--replay", choices=sorted(PROJECTS), default="")
+    parser.add_argument("--lane", choices=("standard", "tailscale"), default="")
+    parser.add_argument("--refresh-tailscale-lock", action="append", type=lock_update)
     args = parser.parse_args()
-    update(args.root, args.cargo, os.environ.pop("OPENCODE_API_KEY", ""), args.replay)
+    if args.refresh_tailscale_lock:
+        if args.lane or args.replay:
+            parser.error("a lockfile refresh cannot be combined with a release check")
+        refresh_tailscale_lock(args.root, args.cargo, args.refresh_tailscale_lock)
+    else:
+        update(args.root, args.cargo, os.environ.pop("OPENCODE_API_KEY", ""), args.replay, args.lane)
