@@ -52,6 +52,8 @@ jobs:
           PATCH_SHA: ${{ inputs.update_patch_sha }}
           CANDIDATE_KIND: ${{ inputs.candidate_kind }}
         run: |
+          git show HEAD:package/tailscale-rs/example.c > "$RUNNER_TEMP/tailscale-smoke-baseline.c"
+          echo "TAILSCALE_SMOKE_BASELINE=$RUNNER_TEMP/tailscale-smoke-baseline.c" >> "$GITHUB_ENV"
           bash .github/scripts/apply-update.sh "$RUNNER_TEMP/upstream-update/update.patch" "$PATCH_SHA" "${{ github.sha }}"
           git diff --cached --check
           python3 .github/scripts/validate-candidate.py "$CANDIDATE_KIND"

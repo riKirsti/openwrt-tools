@@ -223,6 +223,12 @@ verify_tailscale_package() {
         /tmp/tools-load-test "$payload/usr/lib/libtailscalers.so" ts_init
     "$loader" --library-path "$payload/usr/lib:$sdk_library_path" \
         "$payload/smoke"
+    if [[ -f /baseline-tailscale-smoke.c ]]; then
+        "$compiler" -std=c11 -Wall -Wextra -Werror -O2 \
+            -I"$payload/usr/include" /baseline-tailscale-smoke.c \
+            -L"$STAGING_DIR/usr/lib" -ltailscalers -o "$payload/baseline-smoke"
+        "$loader" --library-path "$payload/usr/lib:$sdk_library_path" "$payload/baseline-smoke"
+    fi
     echo 'Tailscale Rust APK header and C smoke test passed'
 }
 

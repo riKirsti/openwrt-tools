@@ -25,7 +25,12 @@ if ! echo "$source_hash  $archive" | sha256sum -c --status; then
   trap - EXIT
 fi
 sudo chown -R 1000:1000 "$cache_dir" "$output_dir"
+smoke_mount=()
+if [[ -n "${TAILSCALE_SMOKE_BASELINE:-}" ]]; then
+  smoke_mount=(--mount "type=bind,source=$TAILSCALE_SMOKE_BASELINE,target=/baseline-tailscale-smoke.c,readonly")
+fi
 docker run --rm \
+  "${smoke_mount[@]}" \
   --env SDK_ARCH \
   --env PACKAGES_COMMIT \
   --env RUST_VERSION \
