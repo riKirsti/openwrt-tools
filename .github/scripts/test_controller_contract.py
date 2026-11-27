@@ -36,7 +36,9 @@ ip() {
         '-o address show dev pt-proton') echo '10.2.0.2/32';;
         '-6 -o address show dev pt-proton') echo '2a07:b944::2:2/128';;
         *' rule show') cat "$FIXTURE/rules-${1#-}";;
-        *' rule del pref 10900') sed -i '/^10900:.*lookup 901/d' "$FIXTURE/rules-${1#-}";;
+        *' rule del pref 10900') sed -i '0,/^10900:/{/^10900:/d;}' "$FIXTURE/rules-${1#-}";;
+        *' rule del pref 10900 oif pt-proton lookup 620')
+            sed -i '/^10900:.*oif pt-proton lookup 620$/d' "$FIXTURE/rules-${1#-}";;
         *' rule add pref 10900 oif pt-proton lookup 620')
             echo '10900: from all oif pt-proton lookup 620' >> "$FIXTURE/rules-${1#-}";;
     esac
