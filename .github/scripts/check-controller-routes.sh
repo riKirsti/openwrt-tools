@@ -9,7 +9,7 @@ ip link add pn-wan type veth peer name pn-receiver
 for device in pn-wan pn-receiver; do
     ip link set "$device" addrgenmode none up
 done
-receiver_mac=$(cat /sys/class/net/pn-receiver/address)
+receiver_mac=$(ip -j link show dev pn-receiver | jq -er '.[0].address')
 ip address add 192.0.2.1/24 dev pn-wan
 ip -6 address add 2001:db8::1/64 dev pn-wan nodad
 ip neigh replace 192.0.2.2 lladdr "$receiver_mac" nud permanent dev pn-wan
@@ -39,11 +39,11 @@ vpn_reconcile true
 
 python3 - <<'PY'
 import errno
+import json
 import socket
+import subprocess
 import time
-from pathlib import Path
 
-counter = Path("/sys/class/net/pn-receiver/statistics/rx_packets")
 destinations = ((socket.AF_INET, "192.0.2.2"), (socket.AF_INET6, "2001:db8::2"))
 
 def probe(mark):
@@ -61,7 +61,8 @@ def probe(mark):
                     raise AssertionError("VPN-selected traffic escaped the unreachable route")
 
 def received():
-    return int(counter.read_text())
+    link = subprocess.check_output(["ip", "-j", "-s", "link", "show", "dev", "pn-receiver"])
+    return json.loads(link)[0]["stats64"]["rx"]["packets"]
 
 before = received()
 probe(0)
