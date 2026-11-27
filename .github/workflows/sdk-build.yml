@@ -64,6 +64,11 @@ jobs:
       - name: Check candidate regression tests
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
+      - name: Check controller routes in an isolated network namespace
+        run: |
+          host_namespace=$(readlink /proc/self/ns/net)
+          sudo unshare --net bash .github/scripts/check-controller-routes.sh "$host_namespace"
+
       - name: Check repository privacy and documentation
         run: python3 .github/scripts/check_repository.py
 

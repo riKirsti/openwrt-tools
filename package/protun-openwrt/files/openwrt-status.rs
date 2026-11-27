@@ -88,6 +88,28 @@ impl Drop for Status { fn drop(&mut self){let _=self.stop();} }
 mod tests {
     use super::*;
     #[test]
+    fn heartbeat_reports_publication_failure_and_resumes_after_repair() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
+        let path = dir.path().join("status.json");
+        let mut status = Status::open(path.to_str(), Some("fixture"), false).unwrap();
+        let previous = dir.path().join("previous.json");
+        std::fs::rename(&path, &previous).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        assert!(status.heartbeat().is_err());
+        assert!(path.is_dir());
+
+        std::fs::remove_dir(&path).unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        status.heartbeat().unwrap();
+        let published: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(published["instance"], "fixture");
+        assert_eq!(published["ready"], false);
+    }
+
+    #[test]
     fn unsafe_status_location_is_rejected_and_probe_never_writes() {
         assert!(Status::open(Some("/tmp/test-state.json"),Some("test-instance"),false).is_err());
         assert!(Status::open(Some("/does-not-exist/state"),Some("test-instance"),true).is_ok());
