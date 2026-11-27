@@ -55,7 +55,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUSTUP_TOOLCHAIN: ${{ steps.rust.outputs.version }}
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           REPLAY: ${{ inputs.replay }}
           LANE: ${{ inputs.lane }}
         shell: bash
