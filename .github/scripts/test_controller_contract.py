@@ -159,6 +159,22 @@ class ControllerContract(unittest.TestCase):
             self.assertIn(f"-{family} route replace default dev pt-proton table 620", routes)
             self.assertIn(f"-{family} route replace unreachable default table 620", routes)
 
+    def test_prepare_and_repeated_health_preserve_unrelated_rules(self):
+        for family in (4, 6):
+            self.write(f"rules-{family}", "10900: from all lookup 901\n")
+
+        result = self.invoke("prepare")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.ready_worker()
+        for _ in range(2):
+            result = self.invoke("health")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.invoke("stop").returncode, 0)
+
+        for family in (4, 6):
+            self.assertEqual((self.root / f"rules-{family}").read_text(),
+                             "10900: from all lookup 901\n")
+
     def test_health_repairs_tun_addressing_and_requires_both_probes(self):
         self.ready_worker()
         result = self.invoke("health")
