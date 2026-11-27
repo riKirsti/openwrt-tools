@@ -19,7 +19,9 @@ uci() { echo "$PROTOCOL"; }
 uplink_device() { echo wan; }
 unsigned_integer() { case "$1" in ''|*[!0-9]*) return 1;; esac; }
 monotonic_seconds() { echo 100; }
-sleep() { if [ "${FAIL_STOP:-}" != yes ]; then command sleep "$@"; fi; }
+sleep() {
+    if [ "${FAIL_STOP:-}" != yes ] && [ "${LOSE_TUN_DURING_REPAIR:-}" != yes ]; then command sleep "$@"; fi
+}
 try_lock() { flock -n "$1"; }
 wait_lock() { flock -w "$2" "$1"; }
 ensure_exit_rule() {
@@ -34,7 +36,11 @@ ip() {
         *'link show dev pt-proton') test -e "$FIXTURE/sys/pt-proton" || return 1
             echo '3: pt-proton: <UP,LOWER_UP>'
             ;;
-        '-o address show dev pt-proton') echo '10.2.0.2/32';;
+        'link set dev pt-proton up')
+            if [ "${LOSE_TUN_DURING_REPAIR:-}" = yes ]; then rm -f "$FIXTURE/sys/pt-proton"; fi;;
+        *' route replace default dev pt-proton table 620 metric 10')
+            test -e "$FIXTURE/sys/pt-proton" || return 1;;
+        '-o address show dev pt-proton') test -e "$FIXTURE/sys/pt-proton" && echo '10.2.0.2/32';;
         '-6 -o address show dev pt-proton') echo '2a07:b944::2:2/128';;
         *' rule show pref 10900 oif pt-proton lookup 620')
             sed -n '/^10900:.*oif pt-proton lookup 620$/p' "$FIXTURE/rules-${1#-}";;
@@ -49,7 +55,7 @@ ip() {
 }
 jsonfilter() {
     case "$1" in
-        -i) jq -er "$(printf '%s' "${4#@}" | sed 's/\[\*\]/[]/g')" "$2";;
+        -i) jq -er "$(printf '%s' "${4#@}" | sed 's/\\[\\*\\]/[]/g')" "$2";;
         -s) printf '%s' "$2" | jq -er "${4#@}";;
     esac
 }
@@ -193,6 +199,11 @@ class ControllerContract(unittest.TestCase):
         for family in (4, 6):
             self.assertEqual((self.root / f"rules-{family}").read_text(),
                              "10900: from all lookup 901\n")
+
+    def test_prepare_fails_if_the_tun_disappears_during_route_repair(self):
+        result = self.invoke("prepare", LOSE_TUN_DURING_REPAIR="yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("TUN did not become usable", result.stderr)
 
     def test_prepare_passes_only_the_selected_transport(self):
         for backend, protocol, field, port in (
