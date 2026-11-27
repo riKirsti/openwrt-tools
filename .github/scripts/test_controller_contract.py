@@ -19,6 +19,7 @@ uci() { echo "$PROTOCOL"; }
 uplink_device() { echo wan; }
 unsigned_integer() { case "$1" in ''|*[!0-9]*) return 1;; esac; }
 monotonic_seconds() { echo 100; }
+sleep() { if [ "${FAIL_STOP:-}" != yes ]; then command sleep "$@"; fi; }
 try_lock() { flock -n "$1"; }
 wait_lock() { flock -w "$2" "$1"; }
 ensure_exit_rule() {
@@ -46,7 +47,7 @@ ip() {
 }
 jsonfilter() {
     case "$1" in
-        -i) jq -er "${4#@}" "$2";;
+        -i) jq -er "$(printf '%s' "${4#@}" | sed 's/\[\*\]/[]/g')" "$2";;
         -s) printf '%s' "$2" | jq -er "${4#@}";;
     esac
 }
@@ -54,10 +55,11 @@ ubus() { echo '{}'; }
 controller_service() {
     case "$1" in
         start) touch "$FIXTURE/sys/pt-proton";;
-        stop) rm -f "$FIXTURE/sys/pt-proton";;
+        stop) [ "${FAIL_STOP:-}" != yes ] && rm -f "$FIXTURE/sys/pt-proton";;
     esac
 }
 controller_client() { test "$1" = --check-config && jq -e . "$2" >/dev/null; }
+controller_metadata() { :; }
 curl() {
     printf '%s\n' "$1" >> "$FIXTURE/probes"
     if [ "${REPLACE_WORKER:-}" = "$1" ]; then
@@ -77,9 +79,18 @@ curl() {
 JSHN = """
 json_init() { fixture_json='{}'; }
 json_add_string() { fixture_json=$(printf '%s' "$fixture_json" | jq -c --arg k "$1" --arg v "$2" '.[$k] = $v'); }
-json_add_int() { [ -z "$1" ] || fixture_json=$(printf '%s' "$fixture_json" | jq -c --arg k "$1" --argjson v "$2" '.[$k] = $v'); }
-json_add_array() { :; }
-json_close_array() { :; }
+json_add_int() {
+    if [ -n "$1" ]; then
+        fixture_json=$(printf '%s' "$fixture_json" | jq -c --arg k "$1" --argjson v "$2" '.[$k] = $v')
+    else
+        fixture_json=$(printf '%s' "$fixture_json" | jq -c --arg k "$fixture_array" --argjson v "$2" '.[$k] += [$v]')
+    fi
+}
+json_add_array() {
+    fixture_array=$1
+    fixture_json=$(printf '%s' "$fixture_json" | jq -c --arg k "$1" '.[$k] = []')
+}
+json_close_array() { fixture_array=; }
 json_add_boolean() { :; }
 json_dump() { printf '%s\n' "$fixture_json"; }
 """
@@ -103,6 +114,7 @@ class ControllerContract(unittest.TestCase):
         self.write("private/active.conf",
                    "Endpoint = 192.0.2.10:51820\nPrivateKey = synthetic\n"
                    "PublicKey = synthetic\nAddress = 10.2.0.2/32, 2a07:b944::2:2/128\n")
+        self.write("private/transport-ports.json", '{"tcp_ports":[443],"tls_ports":[444]}')
         for family in (4, 6):
             self.write(f"rules-{family}", "")
         for name in ("backend.sh", "proton-stealth", "proton-stealth.init"):
@@ -116,6 +128,7 @@ class ControllerContract(unittest.TestCase):
                 "/proc/": "$FIXTURE/processes/",
                 "/etc/init.d/proton-stealth": "controller_service",
                 "/usr/sbin/protun-openwrt": "controller_client",
+                "/usr/libexec/proton-transport-metadata": "controller_metadata",
             }.items():
                 source = source.replace(original, fake)
             path = self.write(name, source)
@@ -158,6 +171,29 @@ class ControllerContract(unittest.TestCase):
         for family in (4, 6):
             self.assertIn(f"-{family} route replace default dev pt-proton table 620", routes)
             self.assertIn(f"-{family} route replace unreachable default table 620", routes)
+
+    def test_prepare_passes_only_the_selected_transport(self):
+        for backend, protocol, field, port in (
+            ("protun", "wireguard-udp", "udp_ports", 51820),
+            ("protun", "wireguard-tcp", "tcp_ports", 443),
+            ("protun", "stealth", "tls_ports", 444),
+            ("stealth", "stealth", "tls_ports", 444),
+        ):
+            with self.subTest(backend=backend, protocol=protocol):
+                result = self.invoke("prepare", BACKEND=backend, PROTOCOL=protocol)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                config = json.loads((self.run_dir / "stealth.json").read_text())
+                self.assertEqual(config["protocol"], protocol)
+                self.assertEqual({key: config[key] for key in config if key.endswith("_ports")},
+                                 {field: [port]})
+
+    def test_failed_stop_cannot_report_a_successful_direct_transition(self):
+        self.ready_worker()
+        result = self.invoke("stop", FAIL_STOP="yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("did not stop", result.stderr)
+        self.assertFalse((self.run_dir / "stealth-wanted").exists())
+        self.assertFalse((self.run_dir / "stealth-health.json").exists())
 
     def test_health_repairs_tun_addressing_and_requires_both_probes(self):
         self.ready_worker()
