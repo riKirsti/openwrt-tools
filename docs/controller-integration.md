@@ -37,9 +37,11 @@ routing tables, physical transport mark, DNS selection, and interface bindings.
 Procd supervises the new process with 30-second unlimited retries; the existing
 controller reconciles policy after TUN recreation. Transport health checks also
 restore the dynamic netifd interface, addresses, and transport routes when procd
-recreates a TUN. This repair does not change LAN selectors or the selected Internet
-mode. HTTPS retries have an explicit total retry-time limit. The new service does not start a
-VPN at boot: the existing Direct-on-boot behavior remains authoritative.
+recreates a TUN. Initial setup and recovery use the same route reconciliation,
+which matches the tunnel rule by priority, output device, and table. This repair
+leaves LAN selectors and the selected Internet mode in place. HTTPS retries have
+an explicit total retry-time limit. The controller-requested service keeps the
+existing Direct-on-boot behavior.
 
 The wrapper creates the exclusive nonpersistent TUN, applies `tun_mtu`, and brings
 the link up before passing it to the protocol engine. The managed `protun` backend applies the tunnel

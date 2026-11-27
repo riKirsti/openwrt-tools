@@ -48,7 +48,7 @@ restore_tun_interface() {
   ip address replace 10.2.0.2/32 dev "$dev" || return 1
   ip -6 address replace 2a07:b944::2:2/128 dev "$dev" nodad || return 1
   ip link set dev "$dev" up || return 1
-  vpn_reconcile true
+  vpn_reconcile true require-link
   return
  fi
  # netifd removes dynamic logical interfaces when their TUN device disappears.
@@ -60,7 +60,7 @@ restore_tun_interface() {
  fi
  for attempt in 1 2 3; do
   if ip -o address show dev "$dev" 2>/dev/null | grep -q '10.2.0.2/32' && ip -6 -o address show dev "$dev" 2>/dev/null | grep -q '2a07:b944::2:2/128'; then
-   vpn_reconcile true
+   vpn_reconcile true require-link
    return
   fi
   sleep 1
@@ -113,8 +113,8 @@ case "${1:-}" in
   addresses="$(sed -n 's/^Address[[:space:]]*=[[:space:]]*//p' "$file" | tr ',' ' ')"
   # These are the reviewed Protun core defaults. Reject a changed contract.
   [ "$(printf '%s\n' "$addresses" | tr -s ' ' | sed 's/^ //;s/ $//')" = '10.2.0.2/32 2a07:b944::2:2/128' ] || { echo 'Unexpected tunnel address contract' >&2; exit 1; }
+  vpn_reconcile true
   for family in 4 6; do
-   ip -"$family" route replace unreachable default table 620 metric 32000
    ip -"$family" rule show | grep -q '^9000:.*fwmark 0x621.*lookup main' || ip -"$family" rule add pref 9000 fwmark 0x621 lookup main
    ip -"$family" rule show | grep -q '^10600:.*fwmark 0x620.*lookup 620' || ip -"$family" rule add pref 10600 fwmark 0x620 lookup 620
   done
@@ -123,18 +123,17 @@ case "${1:-}" in
   /etc/init.d/proton-stealth start 9>&- >/dev/null
   up=false
   for attempt in $(seq 1 40); do
-   if [ "$VPN_BACKEND" = protun ] && [ -e /sys/class/net/"$dev" ]; then
-    restore_tun_interface && { up=true; break; }
+   if [ "$VPN_BACKEND" = protun ]; then
+    if [ -e /sys/class/net/"$dev" ]; then
+     restore_tun_interface && { up=true; break; }
+    fi
+   elif ip -o address show dev "$dev" 2>/dev/null | grep -q '10.2.0.2/32' &&
+        ip -6 -o address show dev "$dev" 2>/dev/null | grep -q '2a07:b944::2:2/128'; then
+    vpn_reconcile true require-link && { up=true; break; }
    fi
-   if ip -o address show dev "$dev" 2>/dev/null | grep -q '10.2.0.2/32' && ip -6 -o address show dev "$dev" 2>/dev/null | grep -q '2a07:b944::2:2/128'; then up=true; break; fi
    sleep 1
   done
   [ "$up" = true ] || { echo 'ProtunNext TUN did not become usable' >&2; exit 1; }
-  for family in 4 6; do
-   while ip -"$family" rule show | grep -q '^10900:'; do ip -"$family" rule del pref 10900; done
-   ip -"$family" route replace default dev "$dev" table 620 metric 10
-   ip -"$family" rule add pref 10900 oif "$dev" lookup 620
-  done
   ;;
  test|health)
   exec 7>"$PROTON_RUNTIME/stealth-health.guard"

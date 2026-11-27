@@ -17,22 +17,19 @@ ip -6 neigh replace 2001:db8::2 lladdr "$receiver_mac" nud permanent dev pn-wan
 
 PROTON_CONTROLLER_BACKEND=protun
 uci() { echo wireguard-udp; }
-ensure_exit_rule() {
-    local family=$1 priority=$2 line=$3
-    shift 3
-    if ! ip "-$family" rule show | grep -Fxq "$line"; then
-        ip "-$family" rule add pref "$priority" "$@"
-    fi
-}
 . package/protun-openwrt/files/controller/backend.sh
 for family in 4 6; do
     ip "-$family" rule add pref 10600 fwmark 0x620 lookup 620
+    ip "-$family" rule add pref 10900 fwmark 0x999 lookup 901
 done
 ip link add pt-proton type dummy
 ip link set pt-proton up
 vpn_reconcile true
+vpn_reconcile true
 for family in 4 6; do
     ip "-$family" route show table 620 | grep -F 'default dev pt-proton'
+    test "$(ip "-$family" rule show pref 10900 oif pt-proton lookup 620 | wc -l)" -eq 1
+    test -n "$(ip "-$family" rule show pref 10900 fwmark 0x999 lookup 901)"
 done
 ip link del pt-proton
 vpn_reconcile true
