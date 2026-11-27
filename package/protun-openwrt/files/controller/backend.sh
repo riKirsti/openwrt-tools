@@ -56,13 +56,17 @@ vpn_ready() {
  [ "$instance" = "$(jsonfilter -i "$PROTON_RUNTIME/stealth-health.json" -e '@.instance')" ] || return 1
 }
 vpn_reconcile() {
- local family
+ local family rule
  [ "${1:-false}" = true ] && [ "$VPN_BACKEND" != wireguard ] || return 0
  for family in 4 6; do
-  ip -"$family" route replace unreachable default table 620 metric 32000
-  if ip link show dev "$VPN_DEV" >/dev/null 2>&1; then
-   ip -"$family" route replace default dev "$VPN_DEV" table 620 metric 10
-   ensure_exit_rule "$family" 10900 "10900: from all oif $VPN_DEV lookup 620" oif "$VPN_DEV" lookup 620
+  ip -"$family" route replace unreachable default table 620 metric 32000 || return 1
+ done
+ ip link show dev "$VPN_DEV" >/dev/null 2>&1 || return 0
+ for family in 4 6; do
+  ip -"$family" route replace default dev "$VPN_DEV" table 620 metric 10 || return 1
+  rule="$(ip -"$family" rule show pref 10900 oif "$VPN_DEV" lookup 620)" || return 1
+  if [ -z "$rule" ]; then
+   ip -"$family" rule add pref 10900 oif "$VPN_DEV" lookup 620 || return 1
   fi
  done
 }

@@ -35,6 +35,8 @@ ip() {
             ;;
         '-o address show dev pt-proton') echo '10.2.0.2/32';;
         '-6 -o address show dev pt-proton') echo '2a07:b944::2:2/128';;
+        *' rule show pref 10900 oif pt-proton lookup 620')
+            sed -n '/^10900:.*oif pt-proton lookup 620$/p' "$FIXTURE/rules-${1#-}";;
         *' rule show') cat "$FIXTURE/rules-${1#-}";;
         *' rule del pref 10900') sed -i '0,/^10900:/{/^10900:/d;}' "$FIXTURE/rules-${1#-}";;
         *' rule del pref 10900 oif pt-proton lookup 620')
@@ -169,8 +171,12 @@ class ControllerContract(unittest.TestCase):
         for _ in range(2):
             result = self.invoke("health")
             self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.invoke("stop").returncode, 0)
+        for family in (4, 6):
+            rules = (self.root / f"rules-{family}").read_text().splitlines()
+            self.assertCountEqual(rules, ["10900: from all lookup 901",
+                                          "10900: from all oif pt-proton lookup 620"])
 
+        self.assertEqual(self.invoke("stop").returncode, 0)
         for family in (4, 6):
             self.assertEqual((self.root / f"rules-{family}").read_text(),
                              "10900: from all lookup 901\n")
